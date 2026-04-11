@@ -294,6 +294,91 @@ def run_ddl(model, col, done: set) -> set:
     log.info(f"Part 2 完成: 成功={success} 失败={failed} DDL总量={col.count()}")
     return done
 
+# ========== BM25 索引 rebuild ==========
+BM25_INDEX_PATH = LOG_DIR / "bm25_index.pkl"
+USERDICT_PATH   = Path(__file__).parent / "loki_userdict.txt"
+
+def rebuild_bm25(client):
+    """从 ChromaDB 全量 rebuild BM25 索引"""
+    import pickle, jieba
+    from rank_bm25 import BM25Okapi
+
+    log.info("=" * 60)
+    log.info("Loki Phase 3: BM25 索引 rebuild")
+
+    jieba.load_userdict(str(USERDICT_PATH))
+    stopwords = set("的 了 是 在 和 有 就 不 也 人 都 一 个 上 我 中 到 大 为 这 与 他 它 要 会 可以 没有 对 对于".split())
+
+    def tokenize(text):
+        return [w.lower().strip() for w in jieba.cut(text) if w.strip() and w.strip() not in stopwords]
+
+    collections_map = {
+        'summaries': 'doc_knowledge_bge_m3',
+        'chunks':    'doc_knowledge_chunks',
+        'ddl':       'ddl_schema_bge_m3',
+    }
+
+    corpus_tokens = []
+    doc_ids = []
+    doc_meta = []
+
+    for source_key, col_name in collections_map.items():
+        try:
+            col = client.get_collection(col_name)
+            count = col.count()
+            if count == 0:
+                continue
+        except Exception:
+            continue
+
+        offset = 0
+        batch_size = 5000
+        loaded = 0
+        while offset < count:
+            results = col.get(limit=batch_size, offset=offset, include=['documents', 'metadatas'])
+            if not results['ids']:
+                break
+            for i, doc_id in enumerate(results['ids']):
+                doc_text = results['documents'][i] or ''
+                meta = results['metadatas'][i] or {}
+                searchable = doc_text
+                for field in ['source_file', 'name', 'path', 'heading', 'topic', 'domain', 'table', 'db', 'description']:
+                    if field in meta and meta[field]:
+                        searchable += ' ' + str(meta[field])
+                tokens = tokenize(searchable)
+                if not tokens:
+                    continue
+                corpus_tokens.append(tokens)
+                doc_ids.append(doc_id)
+                file_key = meta.get('source_file', meta.get('path', meta.get('name', meta.get('table', doc_id))))
+                doc_meta.append({
+                    'source': source_key, 'file': file_key,
+                    'heading': meta.get('heading', ''), 'topic': meta.get('topic', meta.get('table', '')),
+                    'domain': meta.get('domain', source_key), 'doc_preview': doc_text[:500],
+                })
+                loaded += 1
+            offset += batch_size
+        log.info(f"  {col_name}: {loaded} 条")
+
+    if not corpus_tokens:
+        log.warning("  无文档，跳过 BM25 rebuild")
+        return
+
+    t1 = time.time()
+    bm25 = BM25Okapi(corpus_tokens)
+    index_data = {
+        'bm25': bm25, 'doc_ids': doc_ids, 'doc_meta': doc_meta,
+        'corpus_tokens': corpus_tokens,
+        'build_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'doc_count': len(doc_ids),
+    }
+    with open(BM25_INDEX_PATH, 'wb') as f:
+        pickle.dump(index_data, f)
+
+    size_mb = BM25_INDEX_PATH.stat().st_size / 1024 / 1024
+    log.info(f"  BM25 索引 rebuild 完成: {len(doc_ids)} 条, {time.time()-t1:.1f}s, {size_mb:.1f}MB")
+
+
 # ========== 主流程 ==========
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else 'all'
@@ -335,6 +420,10 @@ def main():
             done = run_ddl(model, col_ddl, done)
 
         save_state(done)
+
+        # Phase 3: BM25 索引 rebuild（每轮都更新，<10s）
+        rebuild_bm25(client)
+
         elapsed = (time.time() - t0) / 60
         log.info("=" * 60)
         log.info(f"Loki 完成 耗时={elapsed:.1f}分钟")
