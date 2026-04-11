@@ -9,6 +9,7 @@ import json
 import sys
 import os
 import re
+import pickle
 import urllib.request
 from pathlib import Path
 
@@ -18,6 +19,8 @@ CHROMA_PATH = str(HOME / "Work/data/vectors/data/chroma-doc-knowledge-bge")
 MODEL_PATH = str(HOME / "Work/data/models/bge-m3-backup/bge-m3/BAAI/bge-m3")
 OLLAMA_API = "http://localhost:11434/api/generate"
 LLM_MODEL = "qwen2.5:7b"
+BM25_INDEX_PATH = str(HOME / "Work/projects/knowledge-rag-知识库/code/scripts/logs/bm25_index.pkl")
+USERDICT_PATH = str(HOME / "Work/projects/knowledge-rag-知识库/code/scripts/loki_userdict.txt")
 COLLECTIONS = {
     'summaries': ('doc_knowledge_bge_m3', 0.5),
     'chunks':    ('doc_knowledge_chunks', 0.3),
@@ -27,6 +30,7 @@ COLLECTIONS = {
 # 延迟加载
 _model = None
 _client = None
+_bm25_index = None
 
 def get_model():
     global _model
@@ -41,6 +45,106 @@ def get_client():
         import chromadb
         _client = chromadb.PersistentClient(path=CHROMA_PATH)
     return _client
+
+def get_bm25_index():
+    global _bm25_index
+    if _bm25_index is None:
+        try:
+            with open(BM25_INDEX_PATH, 'rb') as f:
+                _bm25_index = pickle.load(f)
+        except Exception as e:
+            sys.stderr.write(f"BM25 索引加载失败: {e}\n")
+            _bm25_index = {}
+    return _bm25_index
+
+# BM25 搜索所需的分词
+_jieba_loaded = False
+STOPWORDS = set("的 了 是 在 和 有 就 不 也 人 都 一 个 上 我 中 到 大 为 这 与 他 它 要 会 可以 没有 对 对于".split())
+
+def _tokenize(text: str) -> list:
+    global _jieba_loaded
+    import jieba
+    if not _jieba_loaded:
+        jieba.load_userdict(USERDICT_PATH)
+        _jieba_loaded = True
+    return [w.lower().strip() for w in jieba.cut(text) if w.strip() and w.strip() not in STOPWORDS]
+
+def _search_bm25(query: str, top_k: int = 20) -> list:
+    """BM25 关键词搜索"""
+    index = get_bm25_index()
+    if not index or 'bm25' not in index:
+        return []
+    tokens = _tokenize(query)
+    if not tokens:
+        return []
+    scores = index['bm25'].get_scores(tokens)
+    doc_meta = index['doc_meta']
+    top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
+    seen = set()
+    results = []
+    for idx in top_indices:
+        if scores[idx] <= 0:
+            break
+        meta = doc_meta[idx]
+        file_key = meta['file']
+        if file_key in seen:
+            continue
+        seen.add(file_key)
+        results.append({
+            'file': file_key,
+            'bm25_score': float(scores[idx]),
+            'source': meta['source'],
+            'heading': meta.get('heading', ''),
+            'topic': meta.get('topic', ''),
+            'domain': meta.get('domain', ''),
+            'doc_preview': meta.get('doc_preview', ''),
+        })
+        if len(results) >= top_k:
+            break
+    return results
+
+def _rrf_merge(vector_hits: list, bm25_hits: list, k: int = 60, top_n: int = 5) -> list:
+    """Reciprocal Rank Fusion 融合两路结果"""
+    scores = {}   # file_key -> rrf_score
+    source_map = {}  # file_key -> 'vector'|'bm25'|'both'
+    meta_map = {}    # file_key -> best hit data
+
+    for rank, hit in enumerate(vector_hits):
+        key = hit['path']
+        scores[key] = scores.get(key, 0) + 1.0 / (k + rank + 1)
+        source_map[key] = 'vector'
+        meta_map[key] = hit
+
+    for rank, hit in enumerate(bm25_hits):
+        key = hit['file']
+        scores[key] = scores.get(key, 0) + 1.0 / (k + rank + 1)
+        if key in source_map:
+            source_map[key] = 'both'
+        else:
+            source_map[key] = 'bm25'
+            # BM25 独占结果，用 bm25 的 meta 构造返回
+            meta_map[key] = {
+                'text': hit['doc_preview'][:400],
+                'path': key,
+                'source': hit['source'],
+                'heading': hit.get('heading', ''),
+                'topic': hit.get('topic', ''),
+                'domain': hit.get('domain', ''),
+                'similarity': 0,
+                'weighted_score': 0,
+                'weight': 0,
+            }
+
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
+
+    results = []
+    for file_key, rrf_score in ranked:
+        hit = meta_map[file_key].copy()
+        hit['rrf_score'] = round(rrf_score, 5)
+        hit['match_type'] = source_map[file_key]  # vector/bm25/both
+        results.append(hit)
+
+    return results
 
 def _normalize(distance):
     """ChromaDB cosine distance [0,2] -> score [0,1]"""
@@ -72,8 +176,8 @@ def _extract_preview(doc, source, meta):
         summary = f"表 {db}.{table}" + (f" — {desc}" if desc else '')
     return summary if summary else body[:200]
 
-def search_knowledge(query: str, n: int = 5) -> list:
-    """多集合 merge ranking 语义搜索"""
+def _vector_search(query: str, n: int = 20) -> list:
+    """向量语义搜索（内部方法，返回 top n 去重结果）"""
     client = get_client()
     model = get_model()
     q_embed = model.encode([query], normalize_embeddings=True).tolist()
@@ -120,6 +224,20 @@ def search_knowledge(query: str, n: int = 5) -> list:
             seen.add(r['path'])
             deduped.append(r)
     return deduped[:n]
+
+
+def search_knowledge(query: str, n: int = 5) -> list:
+    """Hybrid Search: 向量 + BM25 + RRF 融合"""
+    # 两路并行搜索
+    vector_hits = _vector_search(query, n=20)
+    bm25_hits = _search_bm25(query, top_k=20)
+
+    # 如果 BM25 索引不可用，降级为纯向量搜索
+    if not bm25_hits:
+        return vector_hits[:n]
+
+    # RRF 融合
+    return _rrf_merge(vector_hits, bm25_hits, k=60, top_n=n)
 
 def ask_knowledge(question: str) -> str:
     """RAG + LLM 问答"""
@@ -748,8 +866,12 @@ def handle_request(request):
                 text = f"找到 {len(results)} 个相关文档:\n\n"
                 for i, doc in enumerate(results):
                     src_label = {'summaries': '摘要', 'chunks': '段落', 'ddl': '表结构'}.get(doc['source'], doc['source'])
+                    match_type = doc.get('match_type', 'vector')
+                    match_label = {'vector': '向量', 'bm25': 'BM25', 'both': '双路'}.get(match_type, match_type)
                     heading = f" > {doc['heading']}" if doc.get('heading') else ''
-                    text += f"#{i+1} [{src_label}] 相关度:{doc['similarity']} (加权:{doc['weighted_score']})\n"
+                    rrf = doc.get('rrf_score', '')
+                    score_info = f"RRF:{rrf}" if rrf else f"相关度:{doc['similarity']} (加权:{doc['weighted_score']})"
+                    text += f"#{i+1} [{src_label}] [{match_label}] {score_info}\n"
                     text += f"   来源: {doc['path']}{heading}\n"
                     text += f"   内容: {doc['text'][:400]}\n\n"
                 send_response(id, {"content": [{"type": "text", "text": text}]})
