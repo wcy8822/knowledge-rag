@@ -182,3 +182,14 @@
 - 诊断"橙化率"搜索 miss 根因：BGE-M3 对私有术语无向量表示，权重调整无效
 - 设计 Phase 3 Hybrid Search（BM25+向量+RRF）作为长期解法
 - MCP server 权重临时调整为 summaries 0.5 / chunks 0.3
+
+## 2026-04-11 (续)
+- Git 初始化项目（235 文件，清理嵌套 .git）
+- Phase 3 Hybrid Search 全量落地：
+  - jieba 自定义词典 60+ 术语
+  - BM25 索引 45893 条文档，构建 1.9s，184MB
+  - MCP server search_knowledge 升级为 向量+BM25+RRF 融合
+  - loki_search CLI 支持 hybrid/vector/bm25 三模式
+  - Benchmark: Chunk Hit Rate +10%（40%→50%）
+- ollama stop qwen2.5:7b 释放内存
+- loki pipeline 服务恢复运行
