@@ -27,8 +27,9 @@ SCAN_DIRS = [
 ]
 EXCLUDE_DIRS = {'.obsidian', 'Templates', 'node_modules', '__pycache__',
                 '.git', 'venv', 'env', 'bge-m3-model', 'archives', 'chroma',
-                '人事-简历'}
-SUPPORTED_EXT = {'.md', '.pdf', '.docx', '.xlsx', '.pptx', '.txt', '.sql'}
+                '人事-简历', '.pytest_cache', 'logs'}
+SUPPORTED_EXT = {'.md', '.pdf', '.docx', '.xlsx', '.pptx', '.txt', '.sql',
+                  '.py', '.sh', '.yaml', '.yml'}
 
 COLLECTION_DOCS = "doc_knowledge_bge_m3"
 COLLECTION_DDL  = "ddl_schema_bge_m3"
@@ -77,7 +78,7 @@ def read_file(path: Path) -> str:
     """读取文件内容，支持多格式"""
     ext = path.suffix.lower()
     try:
-        if ext in ('.md', '.txt', '.sql'):
+        if ext in ('.md', '.txt', '.sql', '.py', '.sh', '.yaml', '.yml'):
             return path.read_text(encoding='utf-8', errors='ignore')
 
         elif ext == '.pdf':
@@ -129,6 +130,8 @@ def scan_files() -> list:
                 if f.suffix.lower() not in SUPPORTED_EXT:
                     continue
                 if any(ex in f.parts for ex in EXCLUDE_DIRS):
+                    continue
+                if '.bak.' in f.name:
                     continue
                 st = f.stat()
                 if st.st_size < 50:
