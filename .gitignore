@@ -1,0 +1,44 @@
+# 大文件 symlink（模型和向量数据在外部管理）
+bge-m3-model
+vectors
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# pytest
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 环境变量
+.env
+.env.*
+
+# 日志（pipeline 运行日志不入库，状态文件入库）
+code/scripts/logs/*.log
+code/scripts/logs/benchmark_*.json
+
+# ChromaDB 本地数据（通过 symlink 管理）
+*.sqlite3
+
+# 备份文件
+*.bak.*

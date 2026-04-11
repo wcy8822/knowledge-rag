@@ -1,0 +1,351 @@
+# 本地知识库全量向量化自动化系统 - 配置文件
+# 版本: v1.0
+# 日期: 2026-03-01
+
+# ==================== 系统配置 ====================
+system:
+  # 项目名称
+  name: "本地知识库向量化系统"
+  # 版本号
+  version: "1.0.0"
+  # 调试模式
+  debug: false
+  # 内存限制（GB）
+  memory_limit: 12
+  # 工作目录
+  work_dir: "/Users/didi/Downloads/panth/kb_vectorization"
+
+# ==================== 文件扫描配置 ====================
+scan:
+  # 扫描目录列表
+  directories:
+    - "/Users/didi/knowledge_base_vectorization"
+    - "/Users/didi/Downloads/panth/docs"
+  # 排除目录（支持通配符）
+  exclude_dirs:
+    - ".git"
+    - "node_modules"
+    - "__pycache__"
+    - ".pytest_cache"
+    - "venv"
+    - "env"
+    - "dist"
+    - "build"
+  # 支持的文件类型
+  file_types:
+    - ".md"
+    - ".sql"
+    - ".py"
+    - ".js"
+    - ".java"
+    - ".go"
+    - ".rs"
+    - ".ts"
+    - ".json"
+    - ".yaml"
+    - ".yml"
+  # 最大文件大小（MB）
+  max_file_size_mb: 50
+  # 是否递归扫描子目录
+  recursive: true
+
+# ==================== 业务分类配置 ====================
+categories:
+  # 资讯类
+  news:
+    name: "资讯"
+    patterns:
+      - "资讯"
+      - "news"
+      - "report"
+      - "日报"
+      - "周报"
+  # 商户画像类
+  merchant:
+    name: "商户画像"
+    patterns:
+      - "商户"
+      - "customer"
+      - "profile"
+      - "画像"
+      - "客户"
+  # 技术配置类
+  config:
+    name: "技术配置"
+    patterns:
+      - "config"
+      - "setting"
+      - "配置"
+      - "conf"
+  # 项目汇报类
+  report:
+    name: "项目汇报"
+    patterns:
+      - "汇报"
+      - "report"
+      - "总结"
+      - "review"
+  # 数据表映射类
+  mapping:
+    name: "数据表映射"
+    patterns:
+      - "mapping"
+      - "table"
+      - "schema"
+      - "结构"
+      - "映射"
+  # SQL 调试类
+  sql_debug:
+    name: "SQL 调试"
+    patterns:
+      - "sql"
+      - "debug"
+      - "query"
+      - "调试"
+  # 默认分类
+  default: "其他"
+
+# ==================== 向量化配置 ====================
+vectorize:
+  # 批次大小（文件数）
+  batch_size: 500
+  # MVP 验证批次大小
+  mvp_batch_size: 5
+  # 向量维度
+  vector_dim: 384
+  # 分块大小（字符数）
+  chunk_size: 1000
+  # 分块重叠（字符数）
+  chunk_overlap: 200
+  # 最小块大小
+  min_chunk_size: 100
+  # 最大块数量
+  max_chunks_per_file: 1000
+  # 失败重试次数
+  retry_count: 3
+  # 重试延迟（秒）
+  retry_delay: 1
+
+  # MD 文件预处理规则
+  md_preprocessing:
+    # 移除 markdown 标记
+    remove_md_syntax: true
+    # 合并连续空行
+    merge_empty_lines: true
+    # 按段落分块
+    split_by_paragraph: true
+    # 移除代码块语法高亮
+    remove_code_block_syntax: true
+    # 移除 HTML 标签
+    remove_html_tags: true
+    # 处理表格
+    process_tables: true
+    # 保留特殊词汇
+    preserve_special_words:
+      - "SKU"
+      - "GMV"
+      - "DAU"
+      - "MAU"
+      - "ROI"
+      - "KPI"
+      - "OKR"
+      - "API"
+      - "SQL"
+      - "MD"
+
+# ==================== 存储配置 ====================
+storage:
+  # 存储类型: chroma, faiss
+  type: "chroma"
+  # 向量库目录
+  vector_db_dir: "/Users/didi/Downloads/panth/kb_vectorization/data/vector_db"
+  # Chroma 配置
+  chroma:
+    # 集合名称
+    collection_name: "kb_vectors"
+    # 持久化目录
+    persist_directory: "/Users/didi/Downloads/panth/kb_vectorization/data/vector_db/chroma"
+    # 是否持久化
+    persist: true
+  # FAISS 配置
+  faiss:
+    # 索引类型: flat, ivf, hnsw
+    index_type: "hnsw"
+    # IVF 聚类数
+    nlist: 100
+    # HNSW 参数
+    M: 16
+    efConstruction: 200
+  # 元数据存储
+  metadata:
+    # 元数据文件路径
+    file: "/Users/didi/Downloads/panth/kb_vectorization/data/vector_db/metadata.json"
+    # 自动备份
+    auto_backup: true
+    # 备份目录
+    backup_dir: "/Users/didi/Downloads/panth/kb_vectorization/data/vector_db/backup"
+    # 备份保留数量
+    backup_count: 5
+
+# ==================== 检索配置 ====================
+retrieval:
+  # 默认返回结果数
+  default_top_k: 5
+  # 最大返回结果数
+  max_top_k: 50
+  # 混合检索权重
+  hybrid_weights:
+    keyword: 0.3
+    vector: 0.7
+  # 结果预览长度
+  preview_length: 200
+  # 是否启用脱敏
+  enable_sanitization: true
+  # 脱敏模式: strict, moderate, none
+  sanitization_mode: "moderate"
+
+# ==================== API 配置 ====================
+api:
+  # 服务主机（仅本机访问）
+  host: "127.0.0.1"
+  # 服务端口
+  port: 8000
+  # API 前缀
+  prefix: "/api/v1"
+  # 超时时间（秒）
+  timeout: 60
+  # 最大并发请求数
+  max_concurrent: 10
+  # 请求速率限制（每分钟）
+  rate_limit: 100
+  # 启用 CORS
+  enable_cors: false
+  # 日志请求
+  log_requests: true
+
+# ==================== 监控与更新配置 ====================
+monitor:
+  # 启用文件监控
+  enable_watchdog: true
+  # 监控间隔（秒）
+  poll_interval: 1
+  # 启用定时任务
+  enable_schedule: true
+  # 定时任务配置
+  schedule:
+    # 全量校验时间
+    full_validation_time: "02:00"
+    # 清理失效向量时间
+    cleanup_time: "02:30"
+    # 生成统计报告时间
+    report_time: "08:00"
+  # 事件处理延迟（秒）
+  event_delay: 2
+
+# ==================== 日志配置 ====================
+logging:
+  # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: "INFO"
+  # 日志目录
+  dir: "/Users/didi/Downloads/panth/kb_vectorization/logs"
+  # 日志文件保留天数
+  retention_days: 30
+  # 最大日志文件大小（MB）
+  max_file_size_mb: 100
+  # 日志格式
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  # 日期格式
+  date_format: "%Y-%m-%d %H:%M:%S"
+  # 是否输出到控制台
+  console_output: true
+  # 是否输出到文件
+  file_output: true
+  # 是否使用 JSON 格式
+  json_format: false
+
+# ==================== 统计配置 ====================
+stats:
+  # 统计数据目录
+  dir: "/Users/didi/Downloads/panth/kb_vectorization/data/stats"
+  # 文件清单文件
+  file_list: "file_list.csv"
+  # 处理统计文件
+  processing_stats: "processing_stats.json"
+  # 日报目录
+  daily_reports_dir: "daily_reports"
+  # 实时更新统计
+  realtime: true
+
+# ==================== 安全配置 ====================
+security:
+  # 仅允许本机访问
+  localhost_only: true
+  # 访问令牌（可选）
+  access_token: ""
+  # 启用 IP 白名单
+  enable_ip_whitelist: true
+  # IP 白名单
+  ip_whitelist:
+    - "127.0.0.1"
+    - "::1"
+  # 数据脱敏
+  data_sanitization:
+    # 启用
+    enabled: true
+    # 敏感模式（正则表达式）
+    patterns:
+      - name: "手机号"
+        pattern: "\\d{11}"
+      - name: "银行卡号"
+        pattern: "\\d{15,19}"
+      - name: "身份证号"
+        pattern: "\\d{17}[\\dXx]"
+      - name: "邮箱"
+        pattern: "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}\\b"
+
+# ==================== 性能配置 ====================
+performance:
+  # 启用缓存
+  enable_cache: true
+  # 缓存大小（条目数）
+  cache_size: 1000
+  # 缓存过期时间（秒）
+  cache_ttl: 3600
+  # 启用多线程
+  enable_multithreading: false
+  # 线程池大小
+  thread_pool_size: 4
+  # 启用异步处理
+  enable_async: true
+  # 异步任务队列大小
+  async_queue_size: 100
+
+# ==================== 备份配置 ====================
+backup:
+  # 启用自动备份
+  enabled: true
+  # 备份目录
+  dir: "/Users/didi/Downloads/panth/kb_vectorization/data/backup"
+  # 备份保留天数
+  retention_days: 7
+  # 每日备份时间
+  daily_time: "01:00"
+  # 备份压缩
+  compress: true
+  # 备份包含向量库
+  include_vector_db: true
+  # 备份包含元数据
+  include_metadata: true
+  # 备份包含配置
+  include_config: true
+
+# ==================== 开发配置 ====================
+development:
+  # 开发模式
+  mode: false
+  # 热重载
+  hot_reload: false
+  # 测试数据目录
+  test_data_dir: "/Users/didi/Downloads/panth/kb_vectorization/tests/data"
+  # 启用详细日志
+  verbose_logging: false

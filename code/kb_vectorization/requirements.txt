@@ -1,0 +1,12 @@
+# 核心依赖
+pyyaml>=6.0
+
+# 可选依赖（推荐安装）
+# chromadb>=0.4.0      # Chroma 向量库
+# faiss-cpu>=1.7.0    # FAISS 向量库
+# watchdog>=3.0.0     # 文件监控
+# schedule>=1.2.0     # 定时任务
+# psutil>=5.9.0       # 系统监控
+
+# API 依赖
+flask>=3.0.0

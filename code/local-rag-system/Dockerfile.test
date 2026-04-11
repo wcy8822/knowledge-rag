@@ -1,0 +1,46 @@
+# Local RAG System v1.1.0 - Test Dockerfile
+# Optimized for running comprehensive test suite
+
+FROM python:3.9-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    APP_HOME=/app
+
+# Set working directory
+WORKDIR ${APP_HOME}
+
+# Install system dependencies for testing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    -r requirements.txt \
+    pytest==8.4.2 \
+    pytest-cov==4.1.0 \
+    pytest-timeout==2.1.0 \
+    pytest-asyncio==0.21.1
+
+# Copy application code
+COPY . .
+
+# Create non-root user for security
+RUN useradd -m -u 1000 testuser && chown -R testuser:testuser ${APP_HOME}
+USER testuser
+
+# Labels for metadata
+LABEL maintainer="Local RAG System Team" \
+      version="1.1.0" \
+      description="Local RAG System Test Container"
+
+# Default command: run tests
+CMD ["bash", "-c", "python -m pytest tests/ -v --tb=short --cov=src --cov-report=html --cov-report=term"]

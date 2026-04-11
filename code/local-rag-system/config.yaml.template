@@ -1,0 +1,151 @@
+# 应用基础配置
+app:
+  name: "Local RAG System"
+  version: "1.0.0"
+  debug: false
+  host: "0.0.0.0"
+  port: 8000
+  
+# 数据存储配置
+data:
+  base_dir: "./data"
+  chroma_dir: "./data/chroma"
+  qdrant_dir: "./data/qdrant"
+  metadata_dir: "./data/metadata"
+  upload_dir: "./data/uploads"
+  
+# 文档处理配置
+document:
+  supported_formats: ["pdf", "xlsx", "pptx", "md", "docx", "txt", "html"]
+  max_file_size_mb: 50
+  chunk_size: 750
+  chunk_overlap: 0.15
+  parallel_processing: 4
+  
+  # 类型特定配置
+  excel:
+    primary_key_patterns: ["id", "ID", "key", "KEY", "编号", "ID号"]
+    max_rows_per_chunk: 50
+    skip_empty_rows: true
+    
+  ppt:
+    extract_notes: true
+    combine_title_body: true
+    max_tokens_per_slide: 800
+    
+  code:
+    languages: ["python", "javascript", "java", "cpp", "go", "rust"]
+    extract_comments: true
+    extract_docstrings: true
+    max_function_length: 100
+
+# 嵌入配置
+embedding:
+  provider: "local"
+  model_name: "BAAI/bge-m3"
+  device: "cpu"
+  batch_size: 32
+  normalize_embeddings: true
+  max_length: 8192
+  
+  # 云端配置（可选）
+  cloud:
+    enabled: false
+    provider: "openai"
+    api_key_env: "OPENAI_API_KEY"
+    model: "text-embedding-3-small"
+    max_retries: 3
+    timeout_seconds: 30
+    
+    # 脱敏配置
+    pii_masking:
+      enabled: true
+      patterns:
+        email: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        phone: '\b1[3-9]\d{9}\b'
+        id_card: '\b\d{17}[\dXx]\b'
+      replacement: "[REDACTED]"
+
+# 向量数据库配置
+vector_db:
+  provider: "chroma"
+  
+  chroma:
+    host: "localhost"
+    port: 8001
+    persist_directory: "./data/chroma"
+    collection_name: "knowledge_base"
+    
+  qdrant:
+    host: "localhost"
+    port: 6333
+    api_key: null
+    collection_name: "knowledge_base"
+    
+    # HNSW参数
+    hnsw_config:
+      m: 16
+      ef_construction: 200
+      ef_search: 64
+      full_scan_threshold: 10000
+
+# 检索配置
+retrieval:
+  hybrid_search:
+    enabled: true
+    vector_weight: 0.6
+    bm25_weight: 0.4
+    top_k: 20
+    
+  reranker:
+    enabled: true
+    model_name: "BAAI/bge-reranker-base"
+    device: "cpu"
+    top_n: 6
+    batch_size: 16
+    
+  fallback:
+    min_results: 3
+    expansion_factor: 2
+    enable_recursive: true
+
+# LLM配置
+llm:
+  provider: "claude"
+  model: "claude-3-sonnet-20240229"
+  max_tokens: 2000
+  temperature: 0.1
+  timeout_seconds: 30
+
+# 任务队列配置
+queue:
+  backend: "redis"
+  redis_url: "redis://localhost:6379/0"
+  max_workers: 4
+  task_timeout: 300
+  
+# 监控配置
+monitoring:
+  enabled: true
+  prometheus_port: 9090
+  log_level: "INFO"
+  audit_log_enabled: true
+  metrics_retention_days: 30
+  
+  # 性能指标
+  performance_thresholds:
+    search_latency_p95_ms: 500
+    embedding_throughput_docs_per_min: 1000
+    search_accuracy_hit_at_5: 0.85
+    
+# 安全配置
+security:
+  allow_cloud_embedding: false
+  authentication_enabled: false
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+  audit:
+    log_all_requests: true
+    log_embeddings: false
+    log_search_results: true

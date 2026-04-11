@@ -1,0 +1,5 @@
+#!/bin/bash
+# Loki 搜索快捷入口
+PYTHONPATH="$HOME/Library/Python/3.9/lib/python/site-packages" \
+/Library/Developer/CommandLineTools/usr/bin/python3 \
+/Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/loki_search.py "$@"

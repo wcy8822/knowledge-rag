@@ -1,0 +1,43 @@
+{
+  "vectors": {
+    "test-0": {
+      "id": "test-0",
+      "file_path": "/test/商户画像.md",
+      "file_name": "商户画像.md",
+      "category": "商户画像",
+      "chunk_index": 0,
+      "chunk_text": "商户画像覆盖率计算方法",
+      "metadata": {}
+    },
+    "test-1": {
+      "id": "test-1",
+      "file_path": "/test/数据表映射.md",
+      "file_name": "数据表映射.md",
+      "category": "数据表映射",
+      "chunk_index": 0,
+      "chunk_text": "数据表映射关系说明",
+      "metadata": {}
+    },
+    "test-2": {
+      "id": "test-2",
+      "file_path": "/test/技术配置.md",
+      "file_name": "技术配置.md",
+      "category": "技术配置",
+      "chunk_index": 0,
+      "chunk_text": "API 接口使用指南",
+      "metadata": {}
+    }
+  },
+  "file_index": {
+    "/test/商户画像.md": [
+      "test-0"
+    ],
+    "/test/数据表映射.md": [
+      "test-1"
+    ],
+    "/test/技术配置.md": [
+      "test-2"
+    ]
+  },
+  "updated_at": "2026-03-01T22:39:32.160965"
+}

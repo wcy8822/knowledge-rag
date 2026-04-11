@@ -1,0 +1,82 @@
+# MySQL MCP Server 配置
+# 连接 + 权限 + 安全策略
+
+connection:
+  host: localhost
+  port: 3306
+  user: root
+  password_source: env_file  # 从 ~/.secrets.env 读取
+  password_env_key: MYSQL_ROOT_PASSWORD
+  charset: utf8mb4
+  connect_timeout: 10
+
+security:
+  # 只允许只读操作
+  read_only: true
+  allowed_statements: [SELECT, SHOW, DESCRIBE, EXPLAIN]
+  blocked_keywords: [INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, GRANT, REVOKE]
+
+  # 库白名单（空=允许所有非系统库）
+  allowed_databases: []
+  blocked_databases: [information_schema, mysql, performance_schema, sys]
+
+  # 敏感表/字段脱敏（预留，P1 实现）
+  # sensitive_tables: []
+  # mask_fields: []
+
+limits:
+  max_rows: 100          # 单次查询最多返回行数
+  max_query_length: 4096 # SQL 最大长度
+  query_timeout: 30      # 秒
+
+audit:
+  enabled: true
+  log_file: ~/.allin_ai_safe/mysql-mcp-audit.log
+  log_format: "{timestamp} | {tool} | {database} | {sql_preview}"
+
+# 表→库 权威映射（用于自动修正 LLM 生成的 SQL）
+table_to_db:
+  # data_manager_db
+  v_merchant_profile_latest_di: data_manager_db
+  merchant_profile_analysis: data_manager_db
+  combined_merchant_profile: data_manager_db
+  tag_coverage_by_store: data_manager_db
+  tag_master: data_manager_db
+  tag_enum: data_manager_db
+  tag_catalog: data_manager_db
+  tag_spec: data_manager_db
+  station_tag_coverage: data_manager_db
+  station_tag_target_value: data_manager_db
+  visit_records_enriched: data_manager_db
+  dim_gas_store_info_extend: data_manager_db
+  v_merchant_latest: data_manager_db
+  v_merchant_visit_latest_di: data_manager_db
+  is_ka_direct: data_manager_db
+  orange_report_store: data_manager_db
+  tag_coverage_config: data_manager_db
+  # gas_dw
+  dim_gas_merch_merge_store: gas_dw
+  dwm_gas_trd_profit_store_di: gas_dw
+  dwm_gas_trd_indicators_di: gas_dw
+  dm_merchant_profile_hexagon_wide_table: gas_dw
+  dm_store_competition_5km: gas_dw
+  dm_store_orange_rate: gas_dw
+  dm_store_poi_mapping: gas_dw
+  dm_store_poi_mapping_unique: gas_dw
+  # am_bi_dev
+  gas_merch_operation_tags_di: am_bi_dev
+
+# 数据库别名修正
+db_aliases:
+  data_warehouse: data_manager_db
+  data_manager: data_manager_db
+  gas_data: gas_dw
+  gas_warehouse: gas_dw
+
+# NL2SQL 配置
+nl2sql:
+  llm_api: http://localhost:11434/api/generate
+  llm_model: qwen2.5:7b
+  context_file: ~/.allin_ai_safe/nl2sql-context.md
+  max_retries: 1
+  temperature: 0.1

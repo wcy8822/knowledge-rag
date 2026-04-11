@@ -1,0 +1,113 @@
+version: '3.9'
+
+services:
+  # Main RAG System API
+  rag-system:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: local-rag-v1.1.0
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PORT=8000
+      - LOG_LEVEL=INFO
+      - VECTORIZATION_MODEL=BAAI/bge-m3
+      - VECTOR_STORE_TYPE=chroma
+      - SEARCH_HYBRID=true
+      - VECTOR_WEIGHT=0.6
+      - BM25_WEIGHT=0.4
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./notes:/app/notes:ro
+    depends_on:
+      - cache
+    networks:
+      - rag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis Cache (Optional)
+  cache:
+    image: redis:7-alpine
+    container_name: local-rag-cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - rag-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # Test Runner (Optional)
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: local-rag-tests
+    volumes:
+      - .:/app
+      - ./test_reports:/app/test_reports
+    networks:
+      - rag-network
+    depends_on:
+      - rag-system
+    environment:
+      - RAG_SYSTEM_URL=http://rag-system:8000
+    command: bash -c "pip install pytest pytest-cov && pytest tests/ -v --cov=src --cov-report=html"
+    profiles:
+      - test
+
+  # Development environment (Optional)
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: local-rag-dev
+    ports:
+      - "8001:8000"
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ENVIRONMENT=development
+      - DEBUG=true
+    networks:
+      - rag-network
+    depends_on:
+      - cache
+    profiles:
+      - dev
+    command: >
+      bash -c "
+        pip install -e . &&
+        python -m src.serve.app
+      "
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  rag-network:
+    driver: bridge
