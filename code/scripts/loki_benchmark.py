@@ -29,102 +29,142 @@ BENCHMARK_QUERIES = [
     {
         "query": "橙化率计算公式",
         "expected_files": ["FGW项目知识图谱", "l4_gravity_model_v3", "橙化率"],
-        "expected_chunk": "分子 = (日均汽油订单",  # Phase 2 应该找到的具体内容
+        "expected_chunk": "分子 = (日均汽油订单",
+        "qa_question": "橙化率的计算公式是什么？分子和分母分别是什么？",
+        "qa_facts": ["汽油消费量", "全国"],
     },
     {
         "query": "L4引力模型城市权重参数 ALPHA",
         "expected_files": ["l4_gravity_model", "FGW项目知识图谱"],
         "expected_chunk": "vehicle:0.45",
+        "qa_question": "L4引力模型中城市权重参数 ALPHA 的值是多少？vehicle 系数是多少？",
+        "qa_facts": ["0.45"],
     },
     {
         "query": "变化率 V6 去重取平均",
         "expected_files": ["change_rate_calculator_v6", "CHANGE_RATE_CALCULATION"],
         "expected_chunk": "去重取平均",
+        "qa_question": "变化率 V6 版本中去重取平均的逻辑是怎样的？",
+        "qa_facts": ["去重", "平均"],
     },
     {
         "query": "发改委搁浅规则 50元每吨",
         "expected_files": ["FGW项目知识图谱", "FGW_PRICE_CALCULATION", "run_fgw"],
         "expected_chunk": "50 元/吨",
+        "qa_question": "发改委油价调整中搁浅规则的阈值是多少？",
+        "qa_facts": ["50"],
     },
     {
         "query": "92号汽油吨价到升价转换系数",
         "expected_files": ["FGW项目知识图谱", "FGW_PRICE_CALCULATION"],
         "expected_chunk": "1388",
+        "qa_question": "92号汽油从吨价转换到升价的系数是多少？",
+        "qa_facts": ["1388"],
     },
     {
         "query": "商户画像宽表字段映射关系",
         "expected_files": ["字段映射关系", "商户画像宽表", "JOIN逻辑"],
         "expected_chunk": "字段映射",
+        "qa_question": "商户画像宽表有哪些关键字段？字段映射是怎么做的？",
+        "qa_facts": ["字段映射", "宽表"],
     },
     {
         "query": "非油品随手购BRD核心功能模块",
         "expected_files": ["非油品线上化项目_BRD", "非油品", "随手购"],
         "expected_chunk": "BRD",
+        "qa_question": "非油品随手购BRD中有哪些核心功能模块？",
+        "qa_facts": ["随手购"],
     },
     {
         "query": "标签ETL parking S1 S2 落地",
         "expected_files": ["parking_S1S2", "标签", "ETL"],
         "expected_chunk": "parking",
+        "qa_question": "parking 标签 S1/S2 的 ETL 落地逻辑是什么？",
+        "qa_facts": ["parking", "S1", "S2"],
     },
     {
         "query": "ChromaDB HNSW index 修复方法",
         "expected_files": ["index_metadata", "ChromaDB", "HNSW"],
         "expected_chunk": "pickle",
+        "qa_question": "ChromaDB HNSW index 出问题时怎么修复？",
+        "qa_facts": ["HNSW"],
     },
     {
         "query": "BGE-M3 模型下载路径和维度",
         "expected_files": ["BGE_M3_DOWNLOAD", "bge-m3"],
         "expected_chunk": "1024",
+        "qa_question": "BGE-M3 模型的 embedding 维度是多少？",
+        "qa_facts": ["1024"],
     },
     {
         "query": "flock 互斥锁 ChromaDB 并发写保护",
         "expected_files": ["loki_pipeline", "loki_reindex", "loki_chunk"],
         "expected_chunk": "flock",
+        "qa_question": "Loki 如何防止 ChromaDB 并发写冲突？",
+        "qa_facts": ["flock", "锁"],
     },
     {
         "query": "WTI Brent Dubai 原油权重比例",
         "expected_files": ["FGW项目知识图谱", "change_rate", "原油"],
         "expected_chunk": "25:50:25",
+        "qa_question": "WTI、Brent、Dubai 三种原油的权重比例是多少？",
+        "qa_facts": ["25", "50"],
     },
     {
         "query": "MCP server search_knowledge 搜索接口",
         "expected_files": ["server", "mcp", "search"],
         "expected_chunk": "search_knowledge",
+        "qa_question": "MCP server 的 search_knowledge 接口做什么？",
+        "qa_facts": ["search_knowledge", "搜索"],
     },
     {
         "query": "tag_enum 兜底值治理方案",
         "expected_files": ["tag_enum", "兜底", "enum"],
         "expected_chunk": "兜底",
+        "qa_question": "tag_enum 表的兜底值治理方案是什么？",
+        "qa_facts": ["兜底"],
     },
     {
         "query": "2025Q4 双轮驱动战略目标",
         "expected_files": ["双轮驱动", "2025Q4", "战略"],
         "expected_chunk": "双轮驱动",
+        "qa_question": "2025Q4双轮驱动的战略目标是什么？",
+        "qa_facts": ["双轮驱动"],
     },
     {
         "query": "Ollama qwen2.5 subprocess 硬超时",
         "expected_files": ["loki_reindex", "ollama", "qwen"],
         "expected_chunk": "OLLAMA_HARD_TIMEOUT",
+        "qa_question": "Loki 中 Ollama qwen2.5 的硬超时机制是怎样的？",
+        "qa_facts": ["超时", "timeout"],
     },
     {
         "query": "站点吸引力 attractiveness 品牌系数",
         "expected_files": ["l4_gravity_model", "FGW项目知识图谱"],
         "expected_chunk": "brand",
+        "qa_question": "引力模型中站点吸引力的品牌系数是怎么计算的？",
+        "qa_facts": ["brand", "品牌"],
     },
     {
         "query": "merchant_profile_analysis 表结构",
         "expected_files": ["merchant_profile", "analysis"],
         "expected_chunk": "merchant_profile",
+        "qa_question": "merchant_profile_analysis 表有哪些关键字段？",
+        "qa_facts": ["merchant_profile"],
     },
     {
         "query": "Loki watchdog 卡死检测 stall timeout",
         "expected_files": ["watchdog", "loki_reindex_watchdog"],
         "expected_chunk": "STALL_TIMEOUT",
+        "qa_question": "Loki watchdog 如何检测卡死？stall timeout 是多少？",
+        "qa_facts": ["stall", "timeout"],
     },
     {
         "query": "加油站 OCR 识别 PaddleOCR",
         "expected_files": ["ocr", "gas_station", "PaddleOCR"],
         "expected_chunk": "OCR",
+        "qa_question": "加油站图片 OCR 识别用的什么技术方案？",
+        "qa_facts": ["OCR"],
     },
 ]
 
@@ -252,6 +292,9 @@ def search_hybrid(client, model, query: str, top_k: int = 5, bm25_index=None):
     return results
 
 
+OLLAMA_API = "http://localhost:11434/api/generate"
+QA_MODEL   = "qwen2.5:7b"
+
 def evaluate(hits: list, expected_files: list, expected_chunk: str = None):
     """评估搜索结果"""
     # Recall@5: 预期文件中有多少被找到
@@ -276,6 +319,44 @@ def evaluate(hits: list, expected_files: list, expected_chunk: str = None):
     return recall, chunk_hit
 
 
+def qa_evaluate(hits: list, question: str, facts: list) -> tuple:
+    """QA 评测：把搜索结果喂给 LLM，判断回答是否包含关键事实
+    返回 (pass_bool, answer_str)
+    """
+    import urllib.request
+
+    # 拼 context
+    context_parts = []
+    for i, h in enumerate(hits[:5]):
+        context_parts.append(f"[文档{i+1}] {h['file']}\n{h['doc'][:600]}")
+
+    prompt = (
+        "你是企业知识库助手。基于以下检索到的文档回答问题。直接回答，简洁专业，中文。\n\n"
+        "=== 文档 ===\n" + "\n\n".join(context_parts) +
+        f"\n\n=== 问题 ===\n{question}\n\n=== 回答 ===\n"
+    )
+
+    data = json.dumps({
+        "model": QA_MODEL, "prompt": prompt, "stream": False,
+        "options": {"num_predict": 512, "temperature": 0.1}
+    }).encode()
+
+    try:
+        req = urllib.request.Request(OLLAMA_API, data=data,
+                                     headers={"Content-Type": "application/json"})
+        resp = urllib.request.urlopen(req, timeout=120)
+        answer = json.loads(resp.read()).get("response", "").strip()
+    except Exception as e:
+        return False, f"LLM调用失败: {e}"
+
+    # 判断：答案中是否包含所有关键事实
+    answer_lower = answer.lower()
+    hits_count = sum(1 for f in facts if f.lower() in answer_lower)
+    passed = hits_count >= len(facts) * 0.5  # 至少命中一半事实即通过
+
+    return passed, answer[:200]
+
+
 def run_benchmark(mode='both'):
     print(f"加载 BGE-M3...")
     model = SentenceTransformer(BGE_PATH)
@@ -291,7 +372,7 @@ def run_benchmark(mode='both'):
 
     # 加载 BM25 索引
     bm25_index = None
-    if mode in ('both', 'hybrid'):
+    if mode in ('both', 'hybrid', 'qa'):
         try:
             with open(BM25_INDEX, 'rb') as f:
                 bm25_index = pickle.load(f)
@@ -302,6 +383,7 @@ def run_benchmark(mode='both'):
     results_p1 = []
     results_p2 = []
     results_hybrid = []
+    results_qa = []
 
     print(f"\n{'='*80}")
     print(f"Loki Search Benchmark - {len(BENCHMARK_QUERIES)} queries")
@@ -328,12 +410,18 @@ def run_benchmark(mode='both'):
             p2_files = [f"{h['file'][-30:]}({h.get('source','')})" for h in hits_p2[:3]]
             print(f"  Phase 2: recall={recall_p2:.0%} chunk={'Y' if chunk_p2 else 'N'} | {p2_files}")
 
-        if mode in ('both', 'hybrid') and bm25_index:
+        if mode in ('both', 'hybrid', 'qa') and bm25_index:
             hits_h = search_hybrid(client, model, query, top_k=5, bm25_index=bm25_index)
             recall_h, chunk_h = evaluate(hits_h, expected, exp_chunk)
             results_hybrid.append({'recall': recall_h, 'chunk_hit': chunk_h})
             h_files = [h['file'][-40:] for h in hits_h[:3]]
             print(f"  Hybrid:  recall={recall_h:.0%} chunk={'Y' if chunk_h else 'N'} | {h_files}")
+
+            # QA 评测
+            if mode in ('qa',) and bq.get('qa_question') and bq.get('qa_facts'):
+                passed, answer = qa_evaluate(hits_h, bq['qa_question'], bq['qa_facts'])
+                results_qa.append({'passed': passed, 'answer': answer})
+                print(f"  QA:      {'✅ PASS' if passed else '❌ FAIL'} | {answer[:80]}")
 
     # 汇总
     print(f"\n{'='*80}")
@@ -366,6 +454,12 @@ def run_benchmark(mode='both'):
         print(f"  Chunk Hit Rate:  {chunk_rate_h:.1%}")
         summary['hybrid'] = {'avg_recall': avg_recall_h, 'chunk_hit_rate': chunk_rate_h}
 
+    if results_qa:
+        qa_pass_rate = sum(1 for r in results_qa if r['passed']) / len(results_qa)
+        print(f"QA Evaluation (LLM judge):")
+        print(f"  Pass Rate:       {qa_pass_rate:.1%} ({sum(1 for r in results_qa if r['passed'])}/{len(results_qa)})")
+        summary['qa'] = {'pass_rate': qa_pass_rate, 'total': len(results_qa)}
+
     if results_p2 and results_hybrid:
         delta_recall = avg_recall_h - avg_recall_p2
         delta_chunk = chunk_rate_h - chunk_rate_p2
@@ -389,6 +483,7 @@ def main():
     parser.add_argument('--phase1', action='store_true', help='只测 Phase 1')
     parser.add_argument('--phase2', action='store_true', help='只测 Phase 1+2')
     parser.add_argument('--hybrid', action='store_true', help='只测 Hybrid')
+    parser.add_argument('--qa', action='store_true', help='QA 评测（Hybrid + LLM judge）')
     args = parser.parse_args()
 
     if args.phase1:
@@ -397,6 +492,8 @@ def main():
         mode = 'phase2'
     elif args.hybrid:
         mode = 'hybrid'
+    elif args.qa:
+        mode = 'qa'
     else:
         mode = 'both'
 
