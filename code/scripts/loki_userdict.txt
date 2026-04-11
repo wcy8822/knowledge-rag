@@ -1,0 +1,61 @@
+# Loki jieba 自定义词典
+# 格式: 词语 词频 词性
+# 词频越高越不容易被切碎
+
+# 业务术语
+橙化率 10 n
+搁浅 10 n
+双轮驱动 10 n
+随手购 10 n
+兜底值 10 n
+宽表 10 n
+窄表 10 n
+画像宽表 10 n
+六边形宽表 10 n
+商户画像 10 n
+字段映射 10 n
+标签治理 10 n
+标签清洗 10 n
+非油品 10 n
+加气站 10 n
+重叠站 10 n
+
+# 标签相关
+S1S2 10 n
+parking_available 10 n
+brand_level 10 n
+open_24h 10 n
+is_overlap 10 n
+is_ka 10 n
+gas_flag 10 n
+
+# 技术术语
+BGE-M3 10 n
+ChromaDB 10 n
+MCP server 10 n
+merge ranking 10 n
+BM25 10 n
+RRF 10 n
+NL2SQL 10 n
+
+# 表名
+v_merchant_profile_latest_di 10 n
+dwm_gas_merch_tag_store_df 10 n
+dm_merchant_profile_hexagon_wide_table_final 10 n
+tag_enum 10 n
+tag_catalog 10 n
+tag_master 10 n
+mvc_pop_visit_di 10 n
+gas_merch_operation_tags_di 10 n
+ads_visit_store_daily_summary 10 n
+
+# 项目/模型名
+Loki 10 n
+引力模型 10 n
+发改委 10 n
+变化率 10 n
+
+# 原油
+WTI 10 n
+Brent 10 n
+Dubai 10 n
