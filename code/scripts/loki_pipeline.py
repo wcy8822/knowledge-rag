@@ -34,7 +34,8 @@ COLLECTION_DOCS = "doc_knowledge_bge_m3"
 COLLECTION_DDL  = "ddl_schema_bge_m3"
 LOCK_FILE = Path("/Users/didi/Work/data/vectors/data/chroma-doc-knowledge-bge/.loki_write.lock")
 
-DB_CONFIG = dict(host='localhost', user='root', password='Xjny+1126',
+DB_CONFIG = dict(host='localhost', user='root',
+                 password=os.environ.get('MYSQL_ROOT_PASSWORD', ''),
                  charset='utf8mb4', connect_timeout=5)
 
 BATCH_SIZE    = 8
