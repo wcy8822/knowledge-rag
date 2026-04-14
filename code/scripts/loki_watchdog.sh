@@ -35,11 +35,18 @@ while true; do
 
     if [ $EXIT_CODE -eq 0 ]; then
         fail_count=0
-        log "流水线正常完成 (exit=0)，等待 ${SLEEP_INTERVAL}s 后增量扫描"
+        # 提取本轮统计
+        DOC_COUNT=$(grep -o '文档库: [0-9]*' "$WATCHDOG_LOG" | tail -1 | grep -o '[0-9]*')
+        DDL_COUNT=$(grep -o 'DDL库:  [0-9]*' "$WATCHDOG_LOG" | tail -1 | grep -o '[0-9]*')
+        NEW_DOCS=$(grep -c '✅ 批次入库' "$LOG_DIR"/loki_$(date +%Y%m%d)*.log 2>/dev/null || echo 0)
+        SUMMARY="文档${DOC_COUNT:-?} DDL${DDL_COUNT:-?} 本轮入库${NEW_DOCS}批"
+        log "流水线正常完成 (exit=0)，${SUMMARY}，等待 ${SLEEP_INTERVAL}s"
+        osascript -e "display notification \"${SUMMARY}\" with title \"Loki ✅\" subtitle \"下次扫描 1h 后\"" 2>/dev/null
         sleep $SLEEP_INTERVAL
     else
         fail_count=$((fail_count + 1))
         log "流水线异常退出 (exit=$EXIT_CODE) 连续失败=$fail_count"
+        osascript -e "display notification \"exit=$EXIT_CODE 连续失败$fail_count\" with title \"Loki ❌\" subtitle \"流水线异常\"" 2>/dev/null
 
         if [ $fail_count -ge $MAX_FAIL ]; then
             WAIT=$((SLEEP_INTERVAL * 2))
