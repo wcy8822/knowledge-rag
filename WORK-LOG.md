@@ -193,3 +193,14 @@
   - Benchmark: Chunk Hit Rate +10%（40%→50%）
 - ollama stop qwen2.5:7b 释放内存
 - loki pipeline 服务恢复运行
+
+## 2026-04-14
+- QA benchmark 优化：修正 qa_facts + 加强防幻觉 prompt，Pass Rate 80%→100%
+- P0 代码文件入库：pipeline 支持 .py/.sh/.yaml/.yml，+1874 文件，文档库 10463 条
+- Benchmark ground truth 修正适配实际索引文件名，Recall 39%→62%
+- RRF 去重改用 basename，消除同文件跨 collection 重复占 slot
+- 修复 loki 守护进程：Python 路径 3.9→homebrew 3.14，MySQL 密码 fallback ~/.secrets.env
+- Loki 每轮完成弹 macOS 通知
+- 补全 49 个单元测试（BM25/MCP server/pipeline/benchmark）全绿
+- CLAUDE.md 添加 MySQL 本地连接指引
+- 影响范围：server.py, loki_pipeline.py, loki_watchdog.sh, loki_benchmark.py, loki_search.py, 4 个测试文件
