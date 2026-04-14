@@ -35,8 +35,19 @@ COLLECTION_DOCS = "doc_knowledge_bge_m3"
 COLLECTION_DDL  = "ddl_schema_bge_m3"
 LOCK_FILE = Path("/Users/didi/Work/data/vectors/data/chroma-doc-knowledge-bge/.loki_write.lock")
 
+def _get_mysql_password():
+    val = os.environ.get('MYSQL_ROOT_PASSWORD')
+    if val:
+        return val
+    secrets_file = Path.home() / ".secrets.env"
+    if secrets_file.exists():
+        for line in secrets_file.read_text().splitlines():
+            if line.startswith("export MYSQL_ROOT_PASSWORD="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return ""
+
 DB_CONFIG = dict(host='localhost', user='root',
-                 password=os.environ.get('MYSQL_ROOT_PASSWORD', ''),
+                 password=_get_mysql_password(),
                  charset='utf8mb4', connect_timeout=5)
 
 BATCH_SIZE    = 8

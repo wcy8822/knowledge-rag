@@ -9,7 +9,7 @@ LOG_DIR="$SCRIPT_DIR/logs"
 WATCHDOG_LOG="$LOG_DIR/loki_watchdog.log"
 PID_FILE="$LOG_DIR/loki.pid"
 
-PYTHON="/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python"
+PYTHON="/opt/homebrew/bin/python3"
 # 每轮完成后休眠时间（秒）。3600=1小时后再扫一次增量
 SLEEP_INTERVAL=3600
 # 最大连续失败次数，超过则等更长时间
