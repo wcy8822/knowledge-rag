@@ -103,45 +103,53 @@ def _search_bm25(query: str, top_k: int = 20) -> list:
             break
     return results
 
+def _dedup_key(path: str) -> str:
+    """从路径中提取去重 key（basename 去掉扩展名，小写）"""
+    import os
+    base = os.path.basename(path)
+    name, _ = os.path.splitext(base)
+    return name.lower()
+
 def _rrf_merge(vector_hits: list, bm25_hits: list, k: int = 60, top_n: int = 5) -> list:
-    """Reciprocal Rank Fusion 融合两路结果"""
-    scores = {}   # file_key -> rrf_score
-    source_map = {}  # file_key -> 'vector'|'bm25'|'both'
-    meta_map = {}    # file_key -> best hit data
+    """Reciprocal Rank Fusion 融合两路结果，按 basename 去重"""
+    scores = {}   # dedup_key -> rrf_score
+    source_map = {}  # dedup_key -> 'vector'|'bm25'|'both'
+    meta_map = {}    # dedup_key -> best hit data
 
     for rank, hit in enumerate(vector_hits):
-        key = hit['path']
+        key = _dedup_key(hit['path'])
         scores[key] = scores.get(key, 0) + 1.0 / (k + rank + 1)
         source_map[key] = 'vector'
-        meta_map[key] = hit
+        if key not in meta_map:
+            meta_map[key] = hit
 
     for rank, hit in enumerate(bm25_hits):
-        key = hit['file']
+        key = _dedup_key(hit['file'])
         scores[key] = scores.get(key, 0) + 1.0 / (k + rank + 1)
         if key in source_map:
             source_map[key] = 'both'
         else:
             source_map[key] = 'bm25'
-            # BM25 独占结果，用 bm25 的 meta 构造返回
-            meta_map[key] = {
-                'text': hit['doc_preview'][:400],
-                'path': key,
-                'source': hit['source'],
-                'heading': hit.get('heading', ''),
-                'topic': hit.get('topic', ''),
-                'domain': hit.get('domain', ''),
-                'similarity': 0,
-                'weighted_score': 0,
-                'weight': 0,
-            }
+            if key not in meta_map:
+                meta_map[key] = {
+                    'text': hit['doc_preview'][:400],
+                    'path': hit['file'],
+                    'source': hit['source'],
+                    'heading': hit.get('heading', ''),
+                    'topic': hit.get('topic', ''),
+                    'domain': hit.get('domain', ''),
+                    'similarity': 0,
+                    'weighted_score': 0,
+                    'weight': 0,
+                }
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
     results = []
-    for file_key, rrf_score in ranked:
-        hit = meta_map[file_key].copy()
+    for dedup_key, rrf_score in ranked:
+        hit = meta_map[dedup_key].copy()
         hit['rrf_score'] = round(rrf_score, 5)
-        hit['match_type'] = source_map[file_key]  # vector/bm25/both
+        hit['match_type'] = source_map[dedup_key]
         results.append(hit)
 
     return results
@@ -215,13 +223,14 @@ def _vector_search(query: str, n: int = 20) -> list:
                 'weight': weight,
             })
 
-    # 排序 + 去重（同文件只保留最高分）
+    # 排序 + 去重（同 basename 只保留最高分）
     all_results.sort(key=lambda x: x['weighted_score'], reverse=True)
     seen = set()
     deduped = []
     for r in all_results:
-        if r['path'] not in seen:
-            seen.add(r['path'])
+        dk = _dedup_key(r['path'])
+        if dk not in seen:
+            seen.add(dk)
             deduped.append(r)
     return deduped[:n]
 
