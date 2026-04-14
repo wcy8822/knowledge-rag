@@ -27,6 +27,12 @@ COLLECTIONS = {
 
 STOPWORDS = set("的 了 是 在 和 有 就 不 也 人 都 一 个 上 我 中 到 大 为 这 与 他 它 要 会 可以 没有 对 对于".split())
 
+def _dedup_key(path: str) -> str:
+    import os
+    base = os.path.basename(path)
+    name, _ = os.path.splitext(base)
+    return name.lower()
+
 
 def normalize_score(distance: float) -> float:
     """ChromaDB cosine distance [0,2] -> score [0,1]"""
@@ -86,12 +92,13 @@ def search_merge(client, model, query: str, top_k: int = 5, collection: str = No
     # 按 score 排序
     all_results.sort(key=lambda x: x['score'], reverse=True)
 
-    # 去重: 同文件只保留最高分
+    # 去重: 同 basename 只保留最高分
     seen_files = set()
     deduped = []
     for r in all_results:
-        if r['file'] not in seen_files:
-            seen_files.add(r['file'])
+        dk = _dedup_key(r['file'])
+        if dk not in seen_files:
+            seen_files.add(dk)
             deduped.append(r)
 
     return deduped[:top_k]
@@ -163,19 +170,21 @@ def search_hybrid(client, model, query: str, top_k: int = 5) -> list:
     meta_map = {}
 
     for rank, hit in enumerate(vector_hits):
-        key = hit['file']
+        key = _dedup_key(hit['file'])
         scores[key] = scores.get(key, 0) + 1.0 / (k + rank + 1)
         source_map[key] = 'vector'
-        meta_map[key] = hit
+        if key not in meta_map:
+            meta_map[key] = hit
 
     for rank, hit in enumerate(bm25_hits):
-        key = hit['file']
+        key = _dedup_key(hit['file'])
         scores[key] = scores.get(key, 0) + 1.0 / (k + rank + 1)
         if key in source_map:
             source_map[key] = 'both'
         else:
             source_map[key] = 'bm25'
-            meta_map[key] = hit
+            if key not in meta_map:
+                meta_map[key] = hit
 
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
     results = []
