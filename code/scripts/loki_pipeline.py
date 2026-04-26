@@ -15,6 +15,7 @@ from sentence_transformers import SentenceTransformer
 
 from loki_state import StateV2, build_chroma_loader
 from loki_ddl_filter import is_excluded_table
+from loki_text_extract import extract_for_embed, is_code_path
 
 # ========== 路径配置 ==========
 BGE_PATH     = "/Users/didi/Work/projects/knowledge-rag-知识库/bge-m3-model/bge-m3/BAAI/bge-m3"
@@ -178,7 +179,9 @@ def run_docs(model, col, state: StateV2) -> StateV2:
                     state.mark_doc(str(f), fp)
                     continue
 
-                embed_text = f"文件:{f.name}\n{text}"[:MAX_CHARS]
+                # 代码文件走 head+tail 智能提取（保留 imports/main），文档保持 head 截断
+                body = extract_for_embed(f, text)
+                embed_text = f"文件:{f.name}\n{body}"
                 ids.append(fp)
                 docs.append(embed_text)
                 metas.append({
