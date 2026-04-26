@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Loki ↔ Claude 反馈闭环 Phase 2: 周报 launchd 计划
+  每周日 09:00 触发 loki_query_analyzer.py，输出周报到 OB Inbox。
+  安装：
+    cp code/scripts/launchd/com.local.loki-query-analyzer.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.local.loki-query-analyzer.plist
+  卸载：
+    launchctl unload ~/Library/LaunchAgents/com.local.loki-query-analyzer.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.local.loki-query-analyzer</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/didi/mlx-env/bin/python</string>
+        <string>/Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/loki_query_analyzer.py</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>9</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/tmp/loki-query-analyzer.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/loki-query-analyzer.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin:/Users/didi/mlx-env/bin</string>
+    </dict>
+</dict>
+</plist>
