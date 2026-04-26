@@ -1,50 +1,58 @@
 # 交接文档
-更新时间: 2026-04-15 00:10
+更新时间: 2026-04-26 17:40
 
 ## 本轮共识
-- Phase 3 Hybrid Search 全量落地：BM25 + BGE-M3 向量 + RRF(k=60) 融合
-- 代码文件(.py/.sh/.yaml/.yml)纳入 Loki 索引，覆盖范围从文档扩展到代码
-- Benchmark 从文件名匹配升级为 QA 评测（LLM judge），QA Pass Rate 100%
-- 去重策略升级为 basename 去重，消除同文件跨 collection 重复占 slot
-- P1 铁律强化：每个变更必须有对应单元测试，先测试后提交
+- β：Loki ↔ Claude 反馈闭环 Phase 1+2 全量落地
+- MCP 调用全埋点（search_knowledge / ask_knowledge / nl2sql），写 logs/queries.jsonl
+- 周日 09:00 launchd 自动跑 analyzer，输出周报到 OB Inbox
+- python-docx 装入 ~/mlx-env，docx 解析回归
+- fingerprint 152K vs 库容 63K 差额追溯完成（94K 残留 + 4.3K 持久化漏写）
 
 ## 本轮完成
-- [x] Git 初始化（.gitignore + 235 文件首次提交）
-- [x] Phase 3 Hybrid Search 全 5 步（词典/BM25索引/MCP集成/CLI/Benchmark）
-- [x] BM25 rebuild 集成到 pipeline 自动流程
-- [x] Benchmark QA 评测模式（--qa），QA Pass Rate 100%
-- [x] 代码文件入库（+1874 个 .py/.sh/.yaml），文档库 7309→10463
-- [x] Benchmark ground truth 修正适配实际索引
-- [x] RRF 去重改用 basename，top5 信息密度提升
-- [x] Loki 守护进程修复（Python 路径 + MySQL 密码 fallback）
-- [x] Loki 每轮 macOS 通知（文档数/DDL数/入库批次）
-- [x] MySQL 密码硬编码 → 环境变量 + ~/.secrets.env fallback
-- [x] CLAUDE.md MySQL 连接指引
-- [x] 单元测试 49 个全绿（BM25/MCP server/pipeline/benchmark）
+- [x] Phase 1: query_logger.py + server.py 三分支埋点 + 15 个单测
+- [x] Phase 2: loki_query_analyzer.py + 20 个单测 + launchd plist 安装并加载
+- [x] 端到端验证：周报已写入 OB Inbox（202604261725+Loki周报-反馈闭环.md）
+- [x] python-docx 装入 ~/mlx-env，4/23 日志的 docx 解析失败问题闭环
+- [x] fingerprint 差额根因诊断（OB: 202604261735+Loki-fingerprint差额追溯.md）
+- [x] 提交 2 个原子 commit：641eccd (Phase 1) / 102a373 (Phase 2)
 
 ## 待办
-- [ ] 重启 Claude Code 让 MCP server 实际用上 hybrid search
-- [ ] DDL 权重过高 / 备份表过滤 — 搜索结果被 _backup_ 表污染
-- [ ] 代码文件 chunk — 大 .py 文件截断 2000 字，关键逻辑丢失
-- [ ] MCP server 权重重新评估（当前 summaries 0.5/chunks 0.3/ddl 0.5）
-- [ ] 15个商户画像标签中文名从 tag_catalog 确认
-- [ ] v_merchant_profile_latest_di miss 分析
-- [ ] mysql-mcp-server P1: 敏感表脱敏、NL2SQL 上下文自动从 DDL 向量库拉取
-- [ ] mysql-mcp-server P2: HTTP SSE 模式
+- [ ] **重启 Claude Desktop** 让新 server.py 生效，开始积累真实 query 数据
+- [ ] 一周后看首份真实周报，决定是否做闭环回写（零结果 → 自动重 embed）
+- [ ] Loki state.json 治理（中优先级）：
+  - 一次性清洗：剔除 94K 残留 + 补 4,269 条已入库未登记
+  - 长期：state 从 set[fingerprint] 改为 dict[path → {mtime, fingerprint}]
+  - 修复 loki_pipeline.py:215 持久化漏写
+- [ ] 4/25 异常追溯（51 文件 280 分钟，BM25 之后日志缺失）
+- [ ] 历史遗留：DDL 权重过高 / 备份表过滤 / 代码文件 chunk 截断 / 商户标签中文名
 
 ## 难点与风险
-- BM25 索引 193MB pickle，MCP server 首次搜索延迟 ~2s
-- basename 去重可能误合并同名但不同内容的文件（概率低）
-- QA 评测依赖 ollama qwen2.5:7b，跑 benchmark 前需手动拉起
+- 反馈闭环 MVP 是**只采集不回写**：周报供人决策，不要让 analyzer 自动改 ChromaDB
+- query_logger 写入失败已吞噬，不会阻塞 MCP；但 logs/queries.jsonl 单调增长，未来要加滚动
+- launchd 周日 09:00 触发依赖 ~/mlx-env，若 venv 损坏需手动 reload
+- fingerprint 治理涉及多文件改动，按 P1 拆分谨慎做
 
 ## 快速恢复指引
-读这个文件 + CLAUDE.md（MySQL 连接）+ 以下文件即可接手：
-- `code/rag-mcp-server/server.py` — Hybrid Search 实现
-- `code/scripts/loki_bm25_index.py` — BM25 索引构建器
-- `code/scripts/loki_userdict.txt` — jieba 自定义词典
-- `code/scripts/loki_pipeline.py` — 流水线（含 BM25 auto rebuild）
-- `code/scripts/loki_watchdog.sh` — 守护进程（含 macOS 通知）
-- `code/scripts/loki_search.py` — CLI 搜索（hybrid/vector/bm25）
-- `code/scripts/loki_benchmark.py` — Benchmark（三路对比 + QA 评测）
-- `code/scripts/tests/` — 49 个单元测试
-- `code/scripts/DESIGN_phase3_hybrid_search.md` — Phase 3 设计方案
+```bash
+# 验证 Phase 1+2
+~/mlx-env/bin/python -m pytest /Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/tests/ -q
+
+# 查看 query 日志（待 Claude Desktop 重启后才会有数据）
+cat /Users/didi/Work/projects/knowledge-rag-知识库/logs/queries.jsonl | tail
+
+# 手动跑一次 analyzer（dry-run 不写文件）
+~/mlx-env/bin/python /Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/loki_query_analyzer.py --dry-run --no-cold
+
+# 查看 launchd 状态
+launchctl list | grep -E "loki|gemma|ollama"
+```
+
+关键文件位置：
+- `code/rag-mcp-server/{server.py,query_logger.py}` — Phase 1 埋点
+- `code/scripts/loki_query_analyzer.py` — Phase 2 周报
+- `code/scripts/launchd/com.local.loki-query-analyzer.plist` — 版本化副本
+- `~/Library/LaunchAgents/com.local.loki-query-analyzer.plist` — 系统加载位
+- `code/scripts/tests/{test_query_logger.py,test_query_analyzer.py}` — 35 个单测
+- `logs/queries.jsonl` — Phase 1 写入目标（待 Claude Desktop 重启后开始有数据）
+
+延续上轮的 Hybrid Search / MySQL / 单测体系不变，详见 git log 与 CLAUDE.md。
