@@ -14,6 +14,7 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 
 from loki_state import StateV2, build_chroma_loader
+from loki_ddl_filter import is_excluded_table
 
 # ========== 路径配置 ==========
 BGE_PATH     = "/Users/didi/Work/projects/knowledge-rag-知识库/bge-m3-model/bge-m3/BAAI/bge-m3"
@@ -243,6 +244,12 @@ def run_ddl(model, col, state: StateV2) -> StateV2:
     except Exception as e:
         log.error(f"  MySQL连接失败: {e}")
         return state
+
+    # 过滤备份/归档/临时表（详见 loki_ddl_filter）
+    before_filter = len(tables)
+    tables = [(db, tbl, tc) for db, tbl, tc in tables if not is_excluded_table(db, tbl)]
+    if before_filter != len(tables):
+        log.info(f"  过滤备份/归档/临时表: -{before_filter - len(tables)} 张")
 
     todo = []
     for db, tbl, tcomment in tables:
