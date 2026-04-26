@@ -323,10 +323,20 @@ BM25_INDEX_PATH = LOG_DIR / "bm25_index.pkl"
 USERDICT_PATH   = Path(__file__).parent / "loki_userdict.txt"
 
 def rebuild_bm25(client):
-    """从 ChromaDB 全量 rebuild BM25 索引"""
+    """从 ChromaDB 全量 rebuild BM25 索引
+
+    日志计时分四段：
+      [load chroma+tokenize] 每个 collection 单独打印
+      [build] BM25Okapi 构造
+      [pickle] 写盘
+      [total] 函数总耗时
+    （历史 bug：t1 只覆盖 build+pickle，导致前置 188min 无日志记录。详见
+     OB 笔记 202604262145+Loki-4_25-280min异常追溯.md）
+    """
     import pickle, jieba
     from rank_bm25 import BM25Okapi
 
+    t_start = time.time()
     log.info("=" * 60)
     log.info("Loki Phase 3: BM25 索引 rebuild")
 
@@ -355,6 +365,7 @@ def rebuild_bm25(client):
         except Exception:
             continue
 
+        t_col = time.time()
         offset = 0
         batch_size = 5000
         loaded = 0
@@ -382,14 +393,17 @@ def rebuild_bm25(client):
                 })
                 loaded += 1
             offset += batch_size
-        log.info(f"  {col_name}: {loaded} 条")
+        log.info(f"  {col_name}: {loaded} 条 (load+tokenize {time.time()-t_col:.1f}s)")
 
     if not corpus_tokens:
         log.warning("  无文档，跳过 BM25 rebuild")
         return
 
-    t1 = time.time()
+    t_build = time.time()
     bm25 = BM25Okapi(corpus_tokens)
+    log.info(f"  BM25Okapi 构造: {time.time()-t_build:.1f}s")
+
+    t_pickle = time.time()
     index_data = {
         'bm25': bm25, 'doc_ids': doc_ids, 'doc_meta': doc_meta,
         'corpus_tokens': corpus_tokens,
@@ -400,7 +414,8 @@ def rebuild_bm25(client):
         pickle.dump(index_data, f)
 
     size_mb = BM25_INDEX_PATH.stat().st_size / 1024 / 1024
-    log.info(f"  BM25 索引 rebuild 完成: {len(doc_ids)} 条, {time.time()-t1:.1f}s, {size_mb:.1f}MB")
+    log.info(f"  pickle 写盘: {time.time()-t_pickle:.1f}s ({size_mb:.1f}MB)")
+    log.info(f"  BM25 索引 rebuild 完成: {len(doc_ids)} 条, 总耗时 {time.time()-t_start:.1f}s")
 
 
 # ========== 主流程 ==========
