@@ -13,6 +13,8 @@ import pymysql
 import chromadb
 from sentence_transformers import SentenceTransformer
 
+from loki_state import StateV2, build_chroma_loader
+
 # ========== 路径配置 ==========
 BGE_PATH     = "/Users/didi/Work/projects/knowledge-rag-知识库/bge-m3-model/bge-m3/BAAI/bge-m3"
 CHROMA_DIR   = "/Users/didi/Work/data/vectors/data/chroma-doc-knowledge-bge"
@@ -67,18 +69,13 @@ logging.basicConfig(
 )
 log = logging.getLogger('loki')
 
-# ========== 状态持久化 ==========
-def load_state() -> set:
-    """加载已处理的fingerprint集合"""
-    if STATE_FILE.exists():
-        try:
-            return set(json.loads(STATE_FILE.read_text()))
-        except Exception:
-            pass
-    return set()
+# ========== 状态持久化 (v2: dict[path → fp]，详见 loki_state.py) ==========
+def load_state() -> StateV2:
+    """加载 v2 state；若读到 v1 List 自动从 ChromaDB 迁移。"""
+    return StateV2.load(STATE_FILE, chroma_loader=build_chroma_loader(CHROMA_DIR))
 
-def save_state(done: set):
-    STATE_FILE.write_text(json.dumps(list(done)))
+def save_state(state: StateV2):
+    state.save(STATE_FILE)
 
 def fingerprint(path: str, mtime: float) -> str:
     # 用完整路径+mtime的sha256前32位，避免同名文件碰撞
@@ -153,7 +150,7 @@ def scan_files() -> list:
     return files
 
 # ========== Part 1: 文档向量化 ==========
-def run_docs(model, col, done: set) -> set:
+def run_docs(model, col, state: StateV2) -> StateV2:
     log.info("=" * 60)
     log.info("Loki Part 1: 文档向量化 (MD/PDF/Office/SQL)")
 
@@ -161,7 +158,7 @@ def run_docs(model, col, done: set) -> set:
     log.info(f"  扫描到文件: {len(all_files)}")
 
     todo = [(f, mt) for f, mt in all_files
-            if fingerprint(str(f), mt) not in done]
+            if not state.is_doc_done(str(f), fingerprint(str(f), mt))]
 
     skipped = len(all_files) - len(todo)
     log.info(f"  待处理: {len(todo)} | 跳过已有: {skipped}")
@@ -169,7 +166,7 @@ def run_docs(model, col, done: set) -> set:
     success = failed = 0
     for i in range(0, len(todo), BATCH_SIZE):
         batch = todo[i:i+BATCH_SIZE]
-        ids, docs, metas = [], [], []
+        ids, docs, metas, paths = [], [], [], []
 
         for f, mt in batch:
             fp = fingerprint(str(f), mt)
@@ -177,7 +174,7 @@ def run_docs(model, col, done: set) -> set:
                 text = read_file(f).strip()
                 if len(text) < 30:
                     log.info(f"  SKIP(空) {f.name}")
-                    done.add(fp)
+                    state.mark_doc(str(f), fp)
                     continue
 
                 embed_text = f"文件:{f.name}\n{text}"[:MAX_CHARS]
@@ -190,29 +187,31 @@ def run_docs(model, col, done: set) -> set:
                     'mtime': mt,
                     'source': 'loki_docs',
                 })
+                paths.append(str(f))
                 log.info(f"  [{i+len(ids)}/{len(todo)}] {f.suffix} {f.name}")
             except Exception as e:
                 log.error(f"  FAIL {f.name}: {e}")
                 failed += 1
-                done.add(fp)  # 失败也记录，避免反复卡住
+                state.mark_doc(str(f), fp)  # 失败也登记，避免反复卡住
 
         if not ids:
             continue
         try:
-            # 批内去重（防止同名文件fingerprint碰撞）
-            seen, u_ids, u_docs, u_metas = set(), [], [], []
-            for id_, doc_, meta_ in zip(ids, docs, metas):
+            # 批内去重（防止同名文件fingerprint碰撞，保留首条）
+            seen, u_ids, u_docs, u_metas, u_paths = set(), [], [], [], []
+            for id_, doc_, meta_, p_ in zip(ids, docs, metas, paths):
                 if id_ not in seen:
-                    seen.add(id_); u_ids.append(id_); u_docs.append(doc_); u_metas.append(meta_)
-            ids, docs, metas = u_ids, u_docs, u_metas
+                    seen.add(id_)
+                    u_ids.append(id_); u_docs.append(doc_); u_metas.append(meta_); u_paths.append(p_)
+            ids, docs, metas, paths = u_ids, u_docs, u_metas, u_paths
 
             embeddings = model.encode(docs, normalize_embeddings=True,
                                       show_progress_bar=False).tolist()
             col.upsert(ids=ids, documents=docs, metadatas=metas, embeddings=embeddings)
-            for fp_item in ids:
-                done.add(fp_item)
+            for path_, fp_item in zip(paths, ids):
+                state.mark_doc(path_, fp_item)
             success += len(ids)
-            save_state(done)  # 每批持久化
+            save_state(state)  # 每批持久化
             log.info(f"  ✅ 批次入库 {len(ids)} 条 (总计 {col.count()})")
         except Exception as e:
             log.error(f"  FAIL 入库: {e}")
@@ -222,10 +221,10 @@ def run_docs(model, col, done: set) -> set:
             time.sleep(SLEEP_BATCH)
 
     log.info(f"Part 1 完成: 成功={success} 失败={failed} 库总量={col.count()}")
-    return done
+    return state
 
 # ========== Part 2: DDL向量化 ==========
-def run_ddl(model, col, done: set) -> set:
+def run_ddl(model, col, state: StateV2) -> StateV2:
     log.info("=" * 60)
     log.info("Loki Part 2: MySQL DDL 向量化")
 
@@ -243,12 +242,12 @@ def run_ddl(model, col, done: set) -> set:
         log.info(f"  发现 {len(tables)} 张表")
     except Exception as e:
         log.error(f"  MySQL连接失败: {e}")
-        return done
+        return state
 
     todo = []
     for db, tbl, tcomment in tables:
         ddl_id = hashlib.md5(f"ddl:{db}.{tbl}".encode()).hexdigest()
-        if ddl_id not in done:
+        if not state.is_ddl_done(ddl_id):
             todo.append((db, tbl, tcomment, ddl_id))
 
     log.info(f"  待处理: {len(todo)} | 跳过已有: {len(tables)-len(todo)}")
@@ -294,9 +293,9 @@ def run_ddl(model, col, done: set) -> set:
                                       show_progress_bar=False).tolist()
             col.upsert(ids=ids, documents=docs, metadatas=metas, embeddings=embeddings)
             for ddl_id in ids:
-                done.add(ddl_id)
+                state.mark_ddl(ddl_id)
             success += len(ids)
-            save_state(done)
+            save_state(state)
             log.info(f"  ✅ 批次入库 {len(ids)} 条 (DDL总量={col.count()})")
         except Exception as e:
             log.error(f"  FAIL 入库: {e}")
@@ -307,7 +306,7 @@ def run_ddl(model, col, done: set) -> set:
 
     conn.close()
     log.info(f"Part 2 完成: 成功={success} 失败={failed} DDL总量={col.count()}")
-    return done
+    return state
 
 # ========== BM25 索引 rebuild ==========
 BM25_INDEX_PATH = LOG_DIR / "bm25_index.pkl"
@@ -425,16 +424,16 @@ def main():
         col_ddl  = client.get_or_create_collection(COLLECTION_DDL,
                        metadata={"hnsw:space": "cosine"})
 
-        done = load_state()
-        log.info(f"  已处理fingerprint: {len(done)}")
+        state = load_state()
+        log.info(f"  已处理状态: docs={len(state.docs)} ddl={len(state.ddl)}")
 
         t0 = time.time()
         if mode in ('all', 'docs'):
-            done = run_docs(model, col_docs, done)
+            state = run_docs(model, col_docs, state)
         if mode in ('all', 'ddl'):
-            done = run_ddl(model, col_ddl, done)
+            state = run_ddl(model, col_ddl, state)
 
-        save_state(done)
+        save_state(state)
 
         # Phase 3: BM25 索引 rebuild（每轮都更新，<10s）
         rebuild_bm25(client)
