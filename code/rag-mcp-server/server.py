@@ -13,6 +13,17 @@ import pickle
 import urllib.request
 from pathlib import Path
 
+# 同目录引入 query logger（Phase 1: Loki ↔ Claude 反馈闭环）
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    from query_logger import log_query, QueryTimer
+except Exception as _e:
+    sys.stderr.write(f"[server] query_logger 加载失败，日志功能降级为 noop: {_e}\n")
+    def log_query(*a, **k): return False
+    class QueryTimer:
+        def __enter__(self): self.latency_ms = 0; return self
+        def __exit__(self, *a): return False
+
 # 路径配置
 HOME = Path.home()
 CHROMA_PATH = str(HOME / "Work/data/vectors/data/chroma-doc-knowledge-bge")
@@ -202,8 +213,8 @@ def _vector_search(query: str, n: int = 20) -> list:
             continue
 
         for i in range(len(results['ids'][0])):
-            doc = results['documents'][0][i]
-            meta = results['metadatas'][0][i]
+            doc = results['documents'][0][i] or ''   # 防御 NoneType
+            meta = results['metadatas'][0][i] or {}  # 防御 NoneType
             dist = results['distances'][0][i]
             raw_score = _normalize(dist)
             score = raw_score * weight
@@ -248,9 +259,21 @@ def search_knowledge(query: str, n: int = 5) -> list:
     # RRF 融合
     return _rrf_merge(vector_hits, bm25_hits, k=60, top_n=n)
 
-def ask_knowledge(question: str) -> str:
-    """RAG + LLM 问答"""
+def _ask_knowledge_full(question: str) -> tuple:
+    """RAG + LLM 问答（内部版本，同时返回 docs 供日志记录）。"""
     docs = search_knowledge(question, n=5)
+    answer = _ask_knowledge_from_docs(question, docs)
+    return answer, docs
+
+
+def ask_knowledge(question: str) -> str:
+    """RAG + LLM 问答（保持原签名）。"""
+    answer, _ = _ask_knowledge_full(question)
+    return answer
+
+
+def _ask_knowledge_from_docs(question: str, docs: list) -> str:
+    """基于预先检索好的 docs 做 LLM 问答，便于复用与日志埋点。"""
 
     context_parts = []
     for i, doc in enumerate(docs):
@@ -727,14 +750,12 @@ def add_worklog(project: str, entry: str) -> str:
 
 def send_response(id, result):
     response = {"jsonrpc": "2.0", "id": id, "result": result}
-    msg = json.dumps(response)
-    sys.stdout.write(f"Content-Length: {len(msg.encode())}\r\n\r\n{msg}")
+    sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 def send_error(id, code, message):
     response = {"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}
-    msg = json.dumps(response)
-    sys.stdout.write(f"Content-Length: {len(msg.encode())}\r\n\r\n{msg}")
+    sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
     sys.stdout.flush()
 
 def handle_request(request):
@@ -871,7 +892,18 @@ def handle_request(request):
 
         try:
             if tool_name == "search_knowledge":
-                results = search_knowledge(args["query"], args.get("n", 5))
+                _q = args["query"]
+                _n_req = args.get("n", 5)
+                with QueryTimer() as _t:
+                    results = search_knowledge(_q, _n_req)
+                log_query(
+                    tool="search_knowledge",
+                    query=_q,
+                    n_requested=_n_req,
+                    n_returned=len(results),
+                    top_files=[r.get("path", "") for r in results[:5]],
+                    latency_ms=_t.latency_ms,
+                )
                 text = f"找到 {len(results)} 个相关文档:\n\n"
                 for i, doc in enumerate(results):
                     src_label = {'summaries': '摘要', 'chunks': '段落', 'ddl': '表结构'}.get(doc['source'], doc['source'])
@@ -886,7 +918,17 @@ def handle_request(request):
                 send_response(id, {"content": [{"type": "text", "text": text}]})
 
             elif tool_name == "ask_knowledge":
-                answer = ask_knowledge(args["question"])
+                _q = args["question"]
+                with QueryTimer() as _t:
+                    answer, _docs = _ask_knowledge_full(_q)
+                log_query(
+                    tool="ask_knowledge",
+                    query=_q,
+                    n_requested=5,
+                    n_returned=len(_docs),
+                    top_files=[d.get("path", "") for d in _docs[:5]],
+                    latency_ms=_t.latency_ms,
+                )
                 send_response(id, {"content": [{"type": "text", "text": answer}]})
 
             elif tool_name == "knowledge_stats":
@@ -895,7 +937,20 @@ def handle_request(request):
                 send_response(id, {"content": [{"type": "text", "text": text}]})
 
             elif tool_name == "nl2sql":
-                result = nl2sql(args["question"])
+                _q = args["question"]
+                with QueryTimer() as _t:
+                    result = nl2sql(_q)
+                # 从结果文本里抠 SQL 片段做 top_files 替代（表名提取）
+                _tables = re.findall(r"(?:FROM|JOIN)\s+(?:\w+\.)?(\w+)", result, re.I)
+                log_query(
+                    tool="nl2sql",
+                    query=_q,
+                    n_requested=0,
+                    n_returned=len(_tables),
+                    top_files=list(dict.fromkeys(_tables))[:5],
+                    latency_ms=_t.latency_ms,
+                    extra={"sql_preview": result[:200]},
+                )
                 send_response(id, {"content": [{"type": "text", "text": result}]})
 
             elif tool_name == "query_mysql":
@@ -936,26 +991,14 @@ def handle_request(request):
             send_error(id, -32601, f"Unknown method: {method}")
 
 def read_message():
-    """读取一条 MCP 消息（Content-Length 分帧）"""
-    # 读 header
-    headers = {}
-    while True:
-        line = sys.stdin.buffer.readline()
-        if not line:
-            return None
-        line = line.decode().strip()
-        if not line:
-            break  # 空行 = header 结束
-        if ":" in line:
-            key, val = line.split(":", 1)
-            headers[key.strip()] = val.strip()
-
-    content_length = int(headers.get("Content-Length", 0))
-    if content_length == 0:
+    """读取一条 MCP 消息（newline-delimited JSON，per MCP stdio spec）"""
+    line = sys.stdin.buffer.readline()
+    if not line:
         return None
-
-    body = sys.stdin.buffer.read(content_length)
-    return json.loads(body.decode())
+    line = line.decode("utf-8").strip()
+    if not line:
+        return None
+    return json.loads(line)
 
 def main():
     """MCP stdio server main loop"""
