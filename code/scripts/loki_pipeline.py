@@ -323,18 +323,15 @@ BM25_INDEX_PATH = LOG_DIR / "bm25_index.pkl"
 USERDICT_PATH   = Path(__file__).parent / "loki_userdict.txt"
 
 def rebuild_bm25(client):
-    """从 ChromaDB 全量 rebuild BM25 索引
+    """从 ChromaDB 全量 rebuild BM25 索引（增量 tokenize 缓存）
 
-    日志计时分四段：
-      [load chroma+tokenize] 每个 collection 单独打印
-      [build] BM25Okapi 构造
-      [pickle] 写盘
-      [total] 函数总耗时
-    （历史 bug：t1 只覆盖 build+pickle，导致前置 188min 无日志记录。详见
-     OB 笔记 202604262145+Loki-4_25-280min异常追溯.md）
+    优化：上一轮 pickle 中按 (doc_id, sig) 缓存 tokens，
+    本轮命中则直接复用，未命中才走 jieba.cut。稳态命中率 >95%，
+    188min 预处理 → 几十秒。详见 bm25_tokens_cache.py / OB 4/25 诊断笔记。
     """
     import pickle, jieba
     from rank_bm25 import BM25Okapi
+    from bm25_tokens_cache import compute_sig, load_cache, lookup
 
     t_start = time.time()
     log.info("=" * 60)
@@ -346,6 +343,9 @@ def rebuild_bm25(client):
     def tokenize(text):
         return [w.lower().strip() for w in jieba.cut(text) if w.strip() and w.strip() not in stopwords]
 
+    cache = load_cache(BM25_INDEX_PATH)
+    log.info(f"  上一轮 tokens 缓存: {len(cache)} 条")
+
     collections_map = {
         'summaries': 'doc_knowledge_bge_m3',
         'chunks':    'doc_knowledge_chunks',
@@ -355,6 +355,9 @@ def rebuild_bm25(client):
     corpus_tokens = []
     doc_ids = []
     doc_meta = []
+    doc_text_sigs = []
+    total_hits = 0
+    total_misses = 0
 
     for source_key, col_name in collections_map.items():
         try:
@@ -369,6 +372,7 @@ def rebuild_bm25(client):
         offset = 0
         batch_size = 5000
         loaded = 0
+        col_hits = 0
         while offset < count:
             results = col.get(limit=batch_size, offset=offset, include=['documents', 'metadatas'])
             if not results['ids']:
@@ -380,11 +384,18 @@ def rebuild_bm25(client):
                 for field in ['source_file', 'name', 'path', 'heading', 'topic', 'domain', 'table', 'db', 'description']:
                     if field in meta and meta[field]:
                         searchable += ' ' + str(meta[field])
-                tokens = tokenize(searchable)
+                sig = compute_sig(searchable)
+                cached = lookup(cache, doc_id, sig)
+                if cached is not None:
+                    tokens = cached
+                    col_hits += 1
+                else:
+                    tokens = tokenize(searchable)
                 if not tokens:
                     continue
                 corpus_tokens.append(tokens)
                 doc_ids.append(doc_id)
+                doc_text_sigs.append(sig)
                 file_key = meta.get('source_file', meta.get('path', meta.get('name', meta.get('table', doc_id))))
                 doc_meta.append({
                     'source': source_key, 'file': file_key,
@@ -393,11 +404,18 @@ def rebuild_bm25(client):
                 })
                 loaded += 1
             offset += batch_size
-        log.info(f"  {col_name}: {loaded} 条 (load+tokenize {time.time()-t_col:.1f}s)")
+        total_hits += col_hits
+        total_misses += (loaded - col_hits)
+        hit_rate = (col_hits * 100 // loaded) if loaded else 0
+        log.info(f"  {col_name}: {loaded} 条 (cache hit {col_hits}/{loaded} = {hit_rate}%, "
+                 f"load+tokenize {time.time()-t_col:.1f}s)")
 
     if not corpus_tokens:
         log.warning("  无文档，跳过 BM25 rebuild")
         return
+
+    log.info(f"  cache 总命中: {total_hits}/{total_hits+total_misses} "
+             f"({total_hits*100//(total_hits+total_misses) if (total_hits+total_misses) else 0}%)")
 
     t_build = time.time()
     bm25 = BM25Okapi(corpus_tokens)
@@ -407,6 +425,7 @@ def rebuild_bm25(client):
     index_data = {
         'bm25': bm25, 'doc_ids': doc_ids, 'doc_meta': doc_meta,
         'corpus_tokens': corpus_tokens,
+        'doc_text_sigs': doc_text_sigs,  # H.2: 增量缓存 key
         'build_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'doc_count': len(doc_ids),
     }
