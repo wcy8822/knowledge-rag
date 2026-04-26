@@ -190,15 +190,46 @@ def search_phase1(client, model, query: str, top_k: int = 5):
     return hits
 
 
-def search_phase2(client, model, query: str, top_k: int = 5):
+DEFAULT_WEIGHTS = {
+    'doc_knowledge_bge_m3': 0.5,
+    'doc_knowledge_chunks': 0.3,
+    'ddl_schema_bge_m3': 0.5,
+}
+
+
+def parse_weights(spec: str) -> dict:
+    """解析 'summaries=0.5,chunks=0.3,ddl=0.5' → 完整 collections 权重字典。
+
+    spec 中字段名和默认权重 key 的短名对齐（summaries/chunks/ddl）。
+    缺省字段沿用 DEFAULT_WEIGHTS。
+    """
+    short_to_long = {
+        'summaries': 'doc_knowledge_bge_m3',
+        'chunks':    'doc_knowledge_chunks',
+        'ddl':       'ddl_schema_bge_m3',
+    }
+    out = dict(DEFAULT_WEIGHTS)
+    if not spec:
+        return out
+    for piece in spec.split(','):
+        piece = piece.strip()
+        if not piece or '=' not in piece:
+            continue
+        k, v = piece.split('=', 1)
+        k = k.strip()
+        long_name = short_to_long.get(k, k)
+        try:
+            out[long_name] = float(v.strip())
+        except ValueError:
+            continue
+    return out
+
+
+def search_phase2(client, model, query: str, top_k: int = 5, weights: dict = None):
     """Phase 1+2: merge ranking across summaries + chunks + ddl"""
     q_embed = model.encode([query], normalize_embeddings=True).tolist()
 
-    collections = {
-        'doc_knowledge_bge_m3': 0.5,
-        'doc_knowledge_chunks': 0.3,
-        'ddl_schema_bge_m3': 0.5,
-    }
+    collections = dict(weights) if weights else dict(DEFAULT_WEIGHTS)
 
     all_hits = []
     for col_name, weight in collections.items():
@@ -213,14 +244,16 @@ def search_phase2(client, model, query: str, top_k: int = 5):
                             include=['documents', 'metadatas', 'distances'])
 
         for i in range(len(results['ids'][0])):
-            meta = results['metadatas'][0][i]
-            file_key = meta.get('source_file', meta.get('name', meta.get('path', '')))
+            meta = results['metadatas'][0][i] or {}
+            doc = results['documents'][0][i] or ''
+            file_key = meta.get('source_file', meta.get('name', meta.get('path',
+                       meta.get('table', results['ids'][0][i]))))
             all_hits.append({
                 'file': file_key,
-                'doc': results['documents'][0][i],
+                'doc': doc,
                 'score': normalize_score(results['distances'][0][i]) * weight,
                 'raw_score': normalize_score(results['distances'][0][i]),
-                'source': col_name.split('_')[-1],  # bge_m3 / chunks / bge_m3
+                'source': col_name.split('_')[-1],
             })
 
     # 按 score 排序 + 去重
@@ -357,7 +390,7 @@ def qa_evaluate(hits: list, question: str, facts: list) -> tuple:
     return passed, answer[:200]
 
 
-def run_benchmark(mode='both'):
+def run_benchmark(mode='both', weights: dict = None):
     print(f"加载 BGE-M3...")
     model = SentenceTransformer(BGE_PATH)
     client = chromadb.PersistentClient(CHROMA_DIR)
@@ -404,7 +437,7 @@ def run_benchmark(mode='both'):
             print(f"  Phase 1: recall={recall_p1:.0%} chunk={'Y' if chunk_p1 else 'N'} | {p1_files}")
 
         if mode in ('both', 'phase2'):
-            hits_p2 = search_phase2(client, model, query)
+            hits_p2 = search_phase2(client, model, query, weights=weights)
             recall_p2, chunk_p2 = evaluate(hits_p2, expected, exp_chunk)
             results_p2.append({'recall': recall_p2, 'chunk_hit': chunk_p2})
             p2_files = [f"{h['file'][-30:]}({h.get('source','')})" for h in hits_p2[:3]]
@@ -484,6 +517,8 @@ def main():
     parser.add_argument('--phase2', action='store_true', help='只测 Phase 1+2')
     parser.add_argument('--hybrid', action='store_true', help='只测 Hybrid')
     parser.add_argument('--qa', action='store_true', help='QA 评测（Hybrid + LLM judge）')
+    parser.add_argument('--weights', default='',
+                        help="phase2 权重覆盖，如 'summaries=0.5,chunks=0.5,ddl=0.2'")
     args = parser.parse_args()
 
     if args.phase1:
@@ -497,7 +532,10 @@ def main():
     else:
         mode = 'both'
 
-    run_benchmark(mode)
+    weights = parse_weights(args.weights) if args.weights else None
+    if weights:
+        print(f"使用自定义权重: {weights}")
+    run_benchmark(mode, weights=weights)
 
 
 if __name__ == '__main__':

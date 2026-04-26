@@ -80,3 +80,41 @@ class TestBenchmarkQueriesIntegrity:
     def test_20_queries(self):
         from loki_benchmark import BENCHMARK_QUERIES
         assert len(BENCHMARK_QUERIES) == 20
+
+
+class TestParseWeights:
+    def test_empty_returns_default(self):
+        from loki_benchmark import DEFAULT_WEIGHTS, parse_weights
+        assert parse_weights("") == DEFAULT_WEIGHTS
+        assert parse_weights(None) == DEFAULT_WEIGHTS
+
+    def test_partial_override(self):
+        from loki_benchmark import DEFAULT_WEIGHTS, parse_weights
+        out = parse_weights("ddl=0.2")
+        assert out["ddl_schema_bge_m3"] == 0.2
+        assert out["doc_knowledge_bge_m3"] == DEFAULT_WEIGHTS["doc_knowledge_bge_m3"]
+
+    def test_full_override(self):
+        from loki_benchmark import parse_weights
+        out = parse_weights("summaries=0.6,chunks=0.4,ddl=0.2")
+        assert out["doc_knowledge_bge_m3"] == 0.6
+        assert out["doc_knowledge_chunks"] == 0.4
+        assert out["ddl_schema_bge_m3"] == 0.2
+
+    def test_skip_invalid(self):
+        from loki_benchmark import DEFAULT_WEIGHTS, parse_weights
+        out = parse_weights("ddl=NaN_oops,chunks=0.5")
+        assert out["ddl_schema_bge_m3"] == DEFAULT_WEIGHTS["ddl_schema_bge_m3"]
+        assert out["doc_knowledge_chunks"] == 0.5
+
+    def test_whitespace_tolerance(self):
+        from loki_benchmark import parse_weights
+        out = parse_weights(" summaries = 0.6 , chunks = 0.4 ")
+        assert out["doc_knowledge_bge_m3"] == 0.6
+        assert out["doc_knowledge_chunks"] == 0.4
+
+    def test_unknown_key_passthrough(self):
+        from loki_benchmark import parse_weights
+        out = parse_weights("doc_knowledge_chunks=0.7")
+        # 长 key 直接生效
+        assert out["doc_knowledge_chunks"] == 0.7

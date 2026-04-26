@@ -20,9 +20,11 @@ BM25_INDEX = "/Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/log
 USERDICT   = "/Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/loki_userdict.txt"
 
 COLLECTIONS = {
-    'summaries': ('doc_knowledge_bge_m3', 0.3),
-    'chunks':    ('doc_knowledge_chunks', 0.7),
-    'ddl':       ('ddl_schema_bge_m3', 0.5),
+    # 与 server.py 对齐到 benchmark 调优结果（2026-04-26）：
+    # 0.5/0.4/0.2 Recall@5=57.5%，详见 OB 笔记 202604262200+Loki-MCP权重重评估
+    'summaries': ('doc_knowledge_bge_m3', 0.5),
+    'chunks':    ('doc_knowledge_chunks', 0.4),
+    'ddl':       ('ddl_schema_bge_m3', 0.2),
 }
 
 STOPWORDS = set("的 了 是 在 和 有 就 不 也 人 都 一 个 上 我 中 到 大 为 这 与 他 它 要 会 可以 没有 对 对于".split())
@@ -70,8 +72,8 @@ def search_merge(client, model, query: str, top_k: int = 5, collection: str = No
         for i in range(len(results['ids'][0])):
             doc_id = results['ids'][0][i]
             distance = results['distances'][0][i]
-            meta = results['metadatas'][0][i]
-            doc = results['documents'][0][i]
+            meta = results['metadatas'][0][i] or {}  # 防御 NoneType
+            doc = results['documents'][0][i] or ''   # 防御 NoneType
 
             score = normalize_score(distance) * weight
 

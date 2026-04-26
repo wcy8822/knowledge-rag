@@ -33,9 +33,13 @@ LLM_MODEL = "qwen2.5:7b"
 BM25_INDEX_PATH = str(HOME / "Work/projects/knowledge-rag-知识库/code/scripts/logs/bm25_index.pkl")
 USERDICT_PATH = str(HOME / "Work/projects/knowledge-rag-知识库/code/scripts/loki_userdict.txt")
 COLLECTIONS = {
+    # benchmark 数据驱动调优（2026-04-26）：
+    #   原 0.5/0.3/0.5 Recall@5=34.2% — DDL 0.5 严重过高（schema 噪音多）
+    #   现 0.5/0.4/0.2 Recall@5=57.5% (+23pp)
+    #   详见 OB 笔记 202604262200+Loki-MCP权重重评估
     'summaries': ('doc_knowledge_bge_m3', 0.5),
-    'chunks':    ('doc_knowledge_chunks', 0.3),
-    'ddl':       ('ddl_schema_bge_m3', 0.5),
+    'chunks':    ('doc_knowledge_chunks', 0.4),
+    'ddl':       ('ddl_schema_bge_m3', 0.2),
 }
 
 # 延迟加载
