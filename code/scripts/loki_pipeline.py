@@ -16,6 +16,7 @@ from sentence_transformers import SentenceTransformer
 from loki_state import StateV2, build_chroma_loader
 from loki_ddl_filter import is_excluded_table
 from loki_text_extract import extract_for_embed, is_code_path
+from loki_scan_filter import is_excluded_path
 
 # ========== 路径配置 ==========
 BGE_PATH     = "/Users/didi/Work/projects/knowledge-rag-知识库/bge-m3-model/bge-m3/BAAI/bge-m3"
@@ -142,6 +143,9 @@ def scan_files() -> list:
                 if any(ex in f.parts for ex in EXCLUDE_DIRS):
                     continue
                 if '.bak.' in f.name:
+                    continue
+                # 准入闸（loki_scan_filter）：拦第三方库/虚拟环境/缓存等脏数据
+                if is_excluded_path(f):
                     continue
                 st = f.stat()
                 if st.st_size < 50:
