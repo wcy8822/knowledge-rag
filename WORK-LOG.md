@@ -204,3 +204,16 @@
 - 补全 49 个单元测试（BM25/MCP server/pipeline/benchmark）全绿
 - CLAUDE.md 添加 MySQL 本地连接指引
 - 影响范围：server.py, loki_pipeline.py, loki_watchdog.sh, loki_benchmark.py, loki_search.py, 4 个测试文件
+
+## 2026-04-27
+- **β：Loki ↔ Claude 反馈闭环 Phase 1+2 上线** — query_logger.py + loki_query_analyzer.py + launchd 周日 09:00
+- **state.json 治理**：cleanup 工具治标（152K→63.6K）+ v2 dict[path→fp] 治本，自动从 ChromaDB metadata 反向迁移
+- **chroma GC**：清掉 1,537 条早期 doc_X / oil-algo / ddl_<schema>_<table> 旧 id
+- **DDL 过滤**：is_excluded_table 模块（黑名单库前缀 + 表名 _backup/_bak/_old/_staging/_tmp pattern），入库前拦截 + 一次性清掉 109 条
+- **代码智能截断**：head 70% + tail 30%，保留 imports/main，73% 代码文件不再丢关键逻辑
+- **BM25 计时点修正**：暴露真实 188min/240min 分布（旧日志只算 51min 误导）
+- **BM25 tokens 缓存**：增量复用上一轮 jieba 切词，稳态 188min → 秒级
+- **MCP 权重重评估**：benchmark 数据驱动，DDL 0.5→0.2 + chunks 0.3→0.4，Recall@5 34.2%→57.5% (+23pp)
+- 单测 49 → 194（+145，4 个新模块全覆盖：state v2 / chroma GC / DDL filter / 代码截断 / BM25 cache / parse_weights）
+- 影响范围：8 commit + 4 OB 诊断笔记，server.py / 11 个 scripts / 6 个 tests / 1 plist
+- 关键决策：MVP 只采集不回写、最小变更优先（代码 chunk 完整方案留下次）、每改一个点都先单测
