@@ -72,6 +72,44 @@ def is_excluded_path(path: Union[str, Path]) -> bool:
     return False
 
 
+# 低价值文件名规则（仅 .py）：测试脚本/临时验证脚本，向量化收益极低
+# 2026-04-28 事故：上千个 test_*.py / *_test.py 喂给 BGE-M3，
+# 叠加 PyTorch MPS 长跑泄漏 (issue #154329) → 33GB 内存爆 → 系统崩
+_LOW_VALUE_PY_PATTERNS = (
+    re.compile(r"^test_.+\.py$", re.IGNORECASE),
+    re.compile(r".+_test\.py$", re.IGNORECASE),
+    re.compile(r".+_test_\d+\.py$", re.IGNORECASE),       # foo_test_1.py
+    re.compile(r"^bulletproof_.+\.py$", re.IGNORECASE),
+    re.compile(r"^standalone_.+\.py$", re.IGNORECASE),
+    re.compile(r"^reliable_.+\.py$", re.IGNORECASE),
+    re.compile(r"^autonomous_.+\.py$", re.IGNORECASE),
+    re.compile(r"^ultra_stable_.+\.py$", re.IGNORECASE),
+    re.compile(r"^check_.+\.py$", re.IGNORECASE),         # check_sheets.py
+    re.compile(r"^monitor_test_.+\.py$", re.IGNORECASE),
+    re.compile(r"^read_headers\.py$", re.IGNORECASE),
+    re.compile(r"^inspect_.+\.py$", re.IGNORECASE),
+    re.compile(r"^end_to_end_.+\.py$", re.IGNORECASE),
+    re.compile(r"^complete_.+_test_.+\.py$", re.IGNORECASE),
+    re.compile(r"^downstream_.+\.py$", re.IGNORECASE),
+)
+
+
+def is_low_value_file(path: Union[str, Path]) -> bool:
+    """文件名级别的低价值检测（仅对 .py 生效）。
+
+    返回 True 表示该文件名属于测试/临时验证脚本，向量化无意义。
+    路径黑名单由 is_excluded_path() 处理，本函数只看文件名。
+    """
+    p = Path(path)
+    if p.suffix.lower() != ".py":
+        return False
+    name = p.name
+    for pat in _LOW_VALUE_PY_PATTERNS:
+        if pat.match(name):
+            return True
+    return False
+
+
 def filter_paths(paths: Iterable) -> list:
     """从 (path, ...) 序列里剔除被排除的，保持原顺序。
 

@@ -9,7 +9,53 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from loki_scan_filter import (  # noqa: E402
     filter_paths,
     is_excluded_path,
+    is_low_value_file,
 )
+
+
+class TestLowValuePyFilter:
+    """2026-04-28 防 33GB 内存爆事故：拦低价值 test/临时 .py。"""
+
+    def test_test_prefix(self):
+        assert is_low_value_file("/foo/test_something.py")
+        assert is_low_value_file("test_120k_complete.py")
+        assert is_low_value_file("/x/y/test_decision_logic.py")
+
+    def test_test_suffix(self):
+        assert is_low_value_file("foo_test.py")
+        assert is_low_value_file("/a/b/end_to_end_verifier_test.py")
+
+    def test_numbered_test_suffix(self):
+        assert is_low_value_file("downstream_integration_tester_1.py")
+        assert is_low_value_file("foo_test_3.py")
+
+    def test_specific_low_value_names(self):
+        assert is_low_value_file("bulletproof_validation_test.py")
+        assert is_low_value_file("standalone_test_runner.py")
+        assert is_low_value_file("reliable_validation_test.py")
+        assert is_low_value_file("autonomous_local_test_suite.py")
+        assert is_low_value_file("ultra_stable_prod_test.py")
+        assert is_low_value_file("check_sheets.py")
+        assert is_low_value_file("read_headers.py")
+        assert is_low_value_file("inspect_final_sheet.py")
+        assert is_low_value_file("monitor_test_progress.py")
+
+    def test_high_value_py_kept(self):
+        # 真业务代码不应被误杀
+        assert not is_low_value_file("loki_pipeline.py")
+        assert not is_low_value_file("server.py")
+        assert not is_low_value_file("merchant_image_radar.py")
+        assert not is_low_value_file("/path/to/main.py")
+
+    def test_non_py_ignored(self):
+        # 非 .py 直接放行，由 is_excluded_path 决定
+        assert not is_low_value_file("test_foo.md")
+        assert not is_low_value_file("test_something.sql")
+        assert not is_low_value_file("foo_test.txt")
+
+    def test_case_insensitive(self):
+        assert is_low_value_file("Test_Foo.PY")
+        assert is_low_value_file("FOO_TEST.py")
 
 
 class TestExcludedThirdParty:

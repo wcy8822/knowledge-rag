@@ -6,6 +6,46 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
+class TestParseArgs:
+    """2026-04-28 防 33GB 内存爆：--max-files 单次硬上限。"""
+
+    def test_default(self):
+        from loki_pipeline import _parse_args
+        mode, mf = _parse_args(["loki_pipeline.py"])
+        assert mode == 'all'
+        assert mf is None
+
+    def test_mode_only(self):
+        from loki_pipeline import _parse_args
+        mode, mf = _parse_args(["loki_pipeline.py", "docs"])
+        assert mode == 'docs'
+        assert mf is None
+
+    def test_max_files_equals(self):
+        from loki_pipeline import _parse_args
+        mode, mf = _parse_args(["loki_pipeline.py", "--max-files=200"])
+        assert mode == 'all'
+        assert mf == 200
+
+    def test_max_files_space(self):
+        from loki_pipeline import _parse_args
+        mode, mf = _parse_args(["loki_pipeline.py", "--max-files", "500"])
+        assert mode == 'all'
+        assert mf == 500
+
+    def test_mode_and_max_files(self):
+        from loki_pipeline import _parse_args
+        mode, mf = _parse_args(["loki_pipeline.py", "docs", "--max-files=1500"])
+        assert mode == 'docs'
+        assert mf == 1500
+
+    def test_max_files_then_mode(self):
+        from loki_pipeline import _parse_args
+        mode, mf = _parse_args(["loki_pipeline.py", "--max-files", "300", "ddl"])
+        assert mode == 'ddl'
+        assert mf == 300
+
+
 class TestGetMysqlPassword:
     def test_from_env(self):
         from loki_pipeline import _get_mysql_password

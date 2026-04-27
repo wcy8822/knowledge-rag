@@ -16,7 +16,7 @@ from sentence_transformers import SentenceTransformer
 from loki_state import StateV2, build_chroma_loader
 from loki_ddl_filter import is_excluded_table
 from loki_text_extract import extract_for_embed, is_code_path
-from loki_scan_filter import is_excluded_path
+from loki_scan_filter import is_excluded_path, is_low_value_file
 
 # ========== 路径配置 ==========
 BGE_PATH     = "/Users/didi/Work/projects/knowledge-rag-知识库/bge-m3-model/bge-m3/BAAI/bge-m3"
@@ -164,6 +164,10 @@ def scan_files() -> list:
                 # 准入闸（loki_scan_filter）：拦第三方库/虚拟环境/缓存等脏数据
                 if is_excluded_path(f):
                     continue
+                # 文件名低价值过滤（防 33GB 内存爆事故 2026-04-28）：
+                # 拦 test_*.py / *_test.py 等测试垃圾代码
+                if is_low_value_file(f):
+                    continue
                 st = f.stat()
                 if st.st_size < 50:
                     continue
@@ -173,7 +177,7 @@ def scan_files() -> list:
     return files
 
 # ========== Part 1: 文档向量化 ==========
-def run_docs(model, col, state: StateV2) -> StateV2:
+def run_docs(model, col, state: StateV2, max_files: int | None = None) -> StateV2:
     log.info("=" * 60)
     log.info("Loki Part 1: 文档向量化 (MD/PDF/Office/SQL)")
 
@@ -185,6 +189,12 @@ def run_docs(model, col, state: StateV2) -> StateV2:
 
     skipped = len(all_files) - len(todo)
     log.info(f"  待处理: {len(todo)} | 跳过已有: {skipped}")
+
+    # 单次硬上限（防 33GB 内存爆事故 2026-04-28）
+    if max_files is not None and len(todo) > max_files:
+        log.info(f"  ⚠️  --max-files={max_files} 触发：本次只处理前 {max_files} 个，"
+                 f"剩余 {len(todo) - max_files} 个待下次跑")
+        todo = todo[:max_files]
 
     success = failed = content_skip = 0
     for i in range(0, len(todo), BATCH_SIZE):
@@ -468,10 +478,29 @@ def rebuild_bm25(client):
 
 
 # ========== 主流程 ==========
+def _parse_args(argv: list) -> tuple[str, int | None]:
+    """解析 mode + --max-files。保持向后兼容（位置参数 mode）。"""
+    mode = 'all'
+    max_files: int | None = None
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        if a.startswith("--max-files="):
+            max_files = int(a.split("=", 1)[1])
+        elif a == "--max-files" and i + 1 < len(argv):
+            max_files = int(argv[i + 1])
+            i += 1
+        elif not a.startswith("--"):
+            mode = a
+        i += 1
+    return mode, max_files
+
+
 def main():
-    mode = sys.argv[1] if len(sys.argv) > 1 else 'all'
+    mode, max_files = _parse_args(sys.argv)
     log.info("=" * 60)
-    log.info(f"Loki 启动 mode={mode}  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    log.info(f"Loki 启动 mode={mode} max_files={max_files}  "
+             f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     # 1. 先加载模型（无副作用，不需要锁）
     log.info("加载 BGE-M3...")
@@ -503,7 +532,7 @@ def main():
 
         t0 = time.time()
         if mode in ('all', 'docs'):
-            state = run_docs(model, col_docs, state)
+            state = run_docs(model, col_docs, state, max_files=max_files)
         if mode in ('all', 'ddl'):
             state = run_ddl(model, col_ddl, state)
 
