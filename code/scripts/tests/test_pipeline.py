@@ -133,3 +133,55 @@ class TestReadFile:
             assert "# Title" in content
         finally:
             tmp.unlink()
+
+
+class TestContentFingerprint:
+    def test_deterministic(self):
+        from loki_pipeline import content_fingerprint
+        fp1 = content_fingerprint("/x.md", b"hello world")
+        fp2 = content_fingerprint("/x.md", b"hello world")
+        assert fp1 == fp2
+
+    def test_length_32(self):
+        from loki_pipeline import content_fingerprint
+        assert len(content_fingerprint("/x.md", b"abc")) == 32
+
+    def test_path_changes_fp(self):
+        from loki_pipeline import content_fingerprint
+        fp1 = content_fingerprint("/a.md", b"same content")
+        fp2 = content_fingerprint("/b.md", b"same content")
+        assert fp1 != fp2
+
+    def test_content_changes_fp(self):
+        from loki_pipeline import content_fingerprint
+        fp1 = content_fingerprint("/a.md", b"v1")
+        fp2 = content_fingerprint("/a.md", b"v2")
+        assert fp1 != fp2
+
+    def test_independent_of_mtime(self):
+        """v3 核心特性：不依赖 mtime"""
+        from loki_pipeline import content_fingerprint, fingerprint
+        # 同 path + 同 content → content_fp 不变
+        cfp1 = content_fingerprint("/a.md", b"unchanged")
+        cfp2 = content_fingerprint("/a.md", b"unchanged")
+        assert cfp1 == cfp2
+        # 但 mtime_fp 因 mtime 不同而变（旧体系的痛点）
+        mfp1 = fingerprint("/a.md", 100.0)
+        mfp2 = fingerprint("/a.md", 200.0)
+        assert mfp1 != mfp2
+
+    def test_empty_content(self):
+        from loki_pipeline import content_fingerprint
+        assert len(content_fingerprint("/x.md", b"")) == 32
+
+    def test_chinese_content(self):
+        from loki_pipeline import content_fingerprint
+        fp = content_fingerprint("/x.md", "你好世界".encode("utf-8"))
+        assert len(fp) == 32
+
+    def test_different_from_mtime_fp(self):
+        from loki_pipeline import content_fingerprint, fingerprint
+        cfp = content_fingerprint("/a.md", b"hello")
+        mfp = fingerprint("/a.md", 1234567890.0)
+        # 极小概率碰撞，但实际算出来一定不同
+        assert cfp != mfp

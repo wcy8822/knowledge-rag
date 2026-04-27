@@ -117,6 +117,42 @@ class TestLen:
         assert len(s) == 4
 
 
+class TestIsDocDoneMultiFp:
+    """v3 兼容：is_doc_done(*fps) 任一命中即 True。"""
+
+    def test_single_fp_matches(self):
+        s = StateV2(docs={"/a.md": FP_A})
+        assert s.is_doc_done("/a.md", FP_A)
+
+    def test_single_fp_misses(self):
+        s = StateV2(docs={"/a.md": FP_A})
+        assert not s.is_doc_done("/a.md", FP_B)
+
+    def test_two_fps_first_matches(self):
+        # state 存的是 content_fp，pipeline 传 (content_fp, mtime_fp) 两个
+        s = StateV2(docs={"/a.md": "content_fp"})
+        assert s.is_doc_done("/a.md", "content_fp", "mtime_fp")
+
+    def test_two_fps_second_matches(self):
+        # state 仍是旧 mtime_fp，pipeline 传 (content_fp, mtime_fp)
+        s = StateV2(docs={"/a.md": "old_mtime_fp"})
+        assert s.is_doc_done("/a.md", "new_content_fp", "old_mtime_fp")
+
+    def test_two_fps_neither_matches(self):
+        s = StateV2(docs={"/a.md": "stored"})
+        assert not s.is_doc_done("/a.md", "x", "y")
+
+    def test_path_not_present(self):
+        s = StateV2(docs={"/a.md": FP_A})
+        assert not s.is_doc_done("/b.md", FP_A)
+
+    def test_empty_fp_filtered(self):
+        # fp="" 不应误命中（防御 fingerprint 计算失败）
+        s = StateV2(docs={"/a.md": ""})
+        assert not s.is_doc_done("/a.md", "")
+        assert not s.is_doc_done("/a.md", "", "")
+
+
 class TestPipelineEntryFilter:
     def test_filters_legacy_doc_X(self):
         from loki_state import _is_valid_pipeline_entry

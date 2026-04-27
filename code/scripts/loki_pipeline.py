@@ -81,8 +81,25 @@ def save_state(state: StateV2):
     state.save(STATE_FILE)
 
 def fingerprint(path: str, mtime: float) -> str:
-    # 用完整路径+mtime的sha256前32位，避免同名文件碰撞
+    """[v2] path+mtime 指纹（保留兼容，state v2 旧条目仍用此判定）。
+
+    历史 bug：mtime 变化即使内容不变也触发重处理，且 chroma GC 后无法 recover。
+    新代码请优先使用 content_fingerprint(path, content)。
+    """
     return hashlib.sha256(f"{path}:{mtime:.3f}".encode()).hexdigest()[:32]
+
+
+def content_fingerprint(path: str, content: bytes) -> str:
+    """[v3] path+content 指纹（首选）。
+
+    优势：mtime 变但内容不变 → fp 不变 → 跳过；
+    chroma GC 后从 metadata 反向重建 dict[path → content_fp] 恒可行。
+    """
+    h = hashlib.sha256()
+    h.update(path.encode("utf-8", errors="ignore"))
+    h.update(b":")
+    h.update(content)
+    return h.hexdigest()[:32]
 
 # ========== 文档解析 ==========
 def read_file(path: Path) -> str:
@@ -169,30 +186,39 @@ def run_docs(model, col, state: StateV2) -> StateV2:
     skipped = len(all_files) - len(todo)
     log.info(f"  待处理: {len(todo)} | 跳过已有: {skipped}")
 
-    success = failed = 0
+    success = failed = content_skip = 0
     for i in range(0, len(todo), BATCH_SIZE):
         batch = todo[i:i+BATCH_SIZE]
         ids, docs, metas, paths = [], [], [], []
 
         for f, mt in batch:
-            fp = fingerprint(str(f), mt)
+            mtime_fp = fingerprint(str(f), mt)
             try:
                 text = read_file(f).strip()
+
+                # v3 二次判定：mtime 变但 content 没变 → 跳过（不重 embed）
+                content_fp = content_fingerprint(str(f), text.encode("utf-8", errors="ignore"))
+                if state.is_doc_done(str(f), content_fp, mtime_fp):
+                    state.mark_doc(str(f), content_fp)  # 升级到 v3 格式
+                    content_skip += 1
+                    continue
+
                 if len(text) < 30:
                     log.info(f"  SKIP(空) {f.name}")
-                    state.mark_doc(str(f), fp)
+                    state.mark_doc(str(f), content_fp)
                     continue
 
                 # 代码文件走 head+tail 智能提取（保留 imports/main），文档保持 head 截断
                 body = extract_for_embed(f, text)
                 embed_text = f"文件:{f.name}\n{body}"
-                ids.append(fp)
+                ids.append(content_fp)  # v3: chroma id = content_fp
                 docs.append(embed_text)
                 metas.append({
                     'path': str(f),
                     'name': f.name,
                     'ext': f.suffix.lower(),
                     'mtime': mt,
+                    'content_fp': content_fp,
                     'source': 'loki_docs',
                 })
                 paths.append(str(f))
@@ -200,7 +226,7 @@ def run_docs(model, col, state: StateV2) -> StateV2:
             except Exception as e:
                 log.error(f"  FAIL {f.name}: {e}")
                 failed += 1
-                state.mark_doc(str(f), fp)  # 失败也登记，避免反复卡住
+                state.mark_doc(str(f), mtime_fp)  # 失败用 mtime_fp 登记避免反复卡住
 
         if not ids:
             continue
@@ -228,7 +254,7 @@ def run_docs(model, col, state: StateV2) -> StateV2:
         if SLEEP_BATCH > 0:
             time.sleep(SLEEP_BATCH)
 
-    log.info(f"Part 1 完成: 成功={success} 失败={failed} 库总量={col.count()}")
+    log.info(f"Part 1 完成: 成功={success} 失败={failed} content跳过={content_skip} 库总量={col.count()}")
     return state
 
 # ========== Part 2: DDL向量化 ==========

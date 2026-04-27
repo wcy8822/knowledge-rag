@@ -85,8 +85,17 @@ class StateV2:
 
     # ---- 业务判定 ----
 
-    def is_doc_done(self, path: str, fp: str) -> bool:
-        return self.docs.get(str(path)) == fp
+    def is_doc_done(self, path: str, *fps: str) -> bool:
+        """任一 fp 命中即视为已处理。
+
+        v3 兼容：传入多个 fp（如 content_fp, mtime_fp）支持新旧 fingerprint 共存。
+        典型用法 is_doc_done(path, content_fp, mtime_fp) — content 没变就跳过，
+        即使 mtime 变了也不重处理（v2 的 mtime_fp 仍能命中旧条目）。
+        """
+        cur = self.docs.get(str(path))
+        if cur is None:
+            return False
+        return any(cur == fp for fp in fps if fp)
 
     def mark_doc(self, path: str, fp: str) -> None:
         self.docs[str(path)] = fp
