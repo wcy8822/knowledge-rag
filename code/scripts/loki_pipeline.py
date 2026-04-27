@@ -5,12 +5,13 @@ Loki — 本地知识向量化流水线 v2
 特性: 断点续跑 · 自动跳过已处理 · 单文件错误不中断 · 结构化日志
 """
 
-import os, sys, time, json, hashlib, logging, traceback, fcntl
+import os, sys, time, json, hashlib, logging, traceback, fcntl, gc
 from datetime import datetime
 from pathlib import Path
 
 import pymysql
 import chromadb
+import torch
 from sentence_transformers import SentenceTransformer
 
 from loki_state import StateV2, build_chroma_loader
@@ -55,9 +56,32 @@ DB_CONFIG = dict(host='localhost', user='root',
                  password=_get_mysql_password(),
                  charset='utf8mb4', connect_timeout=5)
 
-BATCH_SIZE    = 8
+BATCH_SIZE    = 4              # 2026-04-28 8→4：降单次显存峰值
 MAX_CHARS     = 2000
-SLEEP_BATCH   = 0.3
+SLEEP_BATCH   = 1.0             # 2026-04-28 0.3→1.0：留 GC 时间
+MODEL_RELOAD_EVERY = 50         # 每 N 批彻底卸载并重建 model，释放 MPS context
+
+
+def _free_mps_memory(verbose: bool = False) -> None:
+    """每批后必调：释放 PyTorch MPS 缓存 + Python GC。
+    防 PyTorch issue #154329 长跑泄漏。"""
+    gc.collect()
+    if torch.backends.mps.is_available():
+        try:
+            torch.mps.empty_cache()
+        except Exception as e:
+            if verbose:
+                log.warning(f"  torch.mps.empty_cache 失败: {e}")
+
+
+def _reload_model(old_model) -> SentenceTransformer:
+    """彻底卸载旧 model，重建一个新的，释放 MPS 累积的 tensor cache。"""
+    log.info("  ♻️  周期性重建 model（释放 MPS context）...")
+    del old_model
+    _free_mps_memory()
+    new_model = SentenceTransformer(BGE_PATH)
+    _free_mps_memory()
+    return new_model
 
 # ========== 日志 ==========
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -177,7 +201,8 @@ def scan_files() -> list:
     return files
 
 # ========== Part 1: 文档向量化 ==========
-def run_docs(model, col, state: StateV2, max_files: int | None = None) -> StateV2:
+def run_docs(model, col, state: StateV2, max_files: int | None = None):
+    """返回 (state, model) — model 可能在循环中被周期重建，调用方需更新引用。"""
     log.info("=" * 60)
     log.info("Loki Part 1: 文档向量化 (MD/PDF/Office/SQL)")
 
@@ -197,7 +222,13 @@ def run_docs(model, col, state: StateV2, max_files: int | None = None) -> StateV
         todo = todo[:max_files]
 
     success = failed = content_skip = 0
+    batch_idx = 0
     for i in range(0, len(todo), BATCH_SIZE):
+        batch_idx += 1
+        # 周期性重建 model：释放 MPS 累积 cache（issue #154329 兜底）
+        if batch_idx > 1 and (batch_idx - 1) % MODEL_RELOAD_EVERY == 0:
+            model = _reload_model(model)
+
         batch = todo[i:i+BATCH_SIZE]
         ids, docs, metas, paths = [], [], [], []
 
@@ -260,12 +291,20 @@ def run_docs(model, col, state: StateV2, max_files: int | None = None) -> StateV
         except Exception as e:
             log.error(f"  FAIL 入库: {e}")
             failed += len(ids)
+        finally:
+            # 每批必清：释放 embeddings + MPS cache，防 PyTorch issue #154329
+            try:
+                del embeddings
+            except NameError:
+                pass
+            del ids, docs, metas, paths
+            _free_mps_memory()
 
         if SLEEP_BATCH > 0:
             time.sleep(SLEEP_BATCH)
 
     log.info(f"Part 1 完成: 成功={success} 失败={failed} content跳过={content_skip} 库总量={col.count()}")
-    return state
+    return state, model
 
 # ========== Part 2: DDL向量化 ==========
 def run_ddl(model, col, state: StateV2) -> StateV2:
@@ -350,6 +389,13 @@ def run_ddl(model, col, state: StateV2) -> StateV2:
         except Exception as e:
             log.error(f"  FAIL 入库: {e}")
             failed += len(ids)
+        finally:
+            try:
+                del embeddings
+            except NameError:
+                pass
+            del ids, docs, metas
+            _free_mps_memory()
 
         if SLEEP_BATCH > 0:
             time.sleep(SLEEP_BATCH)
@@ -532,7 +578,7 @@ def main():
 
         t0 = time.time()
         if mode in ('all', 'docs'):
-            state = run_docs(model, col_docs, state, max_files=max_files)
+            state, model = run_docs(model, col_docs, state, max_files=max_files)
         if mode in ('all', 'ddl'):
             state = run_ddl(model, col_ddl, state)
 

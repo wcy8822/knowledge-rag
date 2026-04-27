@@ -6,6 +6,24 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
+class TestMemoryHygiene:
+    """2026-04-28 防 33GB 内存爆：GC + torch.mps.empty_cache 必须不抛错。"""
+
+    def test_free_mps_memory_safe_on_any_backend(self):
+        """无论 MPS 是否可用都不能抛异常。"""
+        from loki_pipeline import _free_mps_memory
+        # 不应抛任何异常
+        _free_mps_memory()
+        _free_mps_memory(verbose=True)
+
+    def test_constants_lowered(self):
+        """BATCH_SIZE / SLEEP_BATCH / MODEL_RELOAD_EVERY 已按事故复盘下调/新增。"""
+        from loki_pipeline import BATCH_SIZE, SLEEP_BATCH, MODEL_RELOAD_EVERY
+        assert BATCH_SIZE <= 4, "BATCH_SIZE 应 ≤ 4 防显存峰值"
+        assert SLEEP_BATCH >= 1.0, "SLEEP_BATCH 应 ≥ 1.0 给 GC 时间"
+        assert MODEL_RELOAD_EVERY > 0
+
+
 class TestParseArgs:
     """2026-04-28 防 33GB 内存爆：--max-files 单次硬上限。"""
 
