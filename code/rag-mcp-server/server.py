@@ -32,15 +32,19 @@ OLLAMA_API = "http://localhost:11434/api/generate"
 LLM_MODEL = "qwen2.5:7b"
 BM25_INDEX_PATH = str(HOME / "Work/projects/knowledge-rag-知识库/code/scripts/logs/bm25_index.pkl")
 USERDICT_PATH = str(HOME / "Work/projects/knowledge-rag-知识库/code/scripts/loki_userdict.txt")
-COLLECTIONS = {
-    # benchmark 数据驱动调优（2026-04-26）：
-    #   原 0.5/0.3/0.5 Recall@5=34.2% — DDL 0.5 严重过高（schema 噪音多）
-    #   现 0.5/0.4/0.2 Recall@5=57.5% (+23pp)
-    #   详见 OB 笔记 202604262200+Loki-MCP权重重评估
+# DDL 已剥离为独立 tool（2026-04-27）：
+#   benchmark 实测：DDL 与文档混搭即使 weight=0.2 仍霸占 top-3
+#   （schema 字段名在向量空间泛化能力差）
+#   把 DDL 独立成 search_ddl，让 LLM 显式选择，文档检索不再被噪声干扰。
+KNOWLEDGE_COLLECTIONS = {
     'summaries': ('doc_knowledge_bge_m3', 0.5),
     'chunks':    ('doc_knowledge_chunks', 0.4),
-    'ddl':       ('ddl_schema_bge_m3', 0.2),
 }
+DDL_COLLECTIONS = {
+    'ddl':       ('ddl_schema_bge_m3', 1.0),
+}
+# 向后兼容别名（部分代码仍引用 COLLECTIONS）
+COLLECTIONS = {**KNOWLEDGE_COLLECTIONS, **DDL_COLLECTIONS}
 
 # 延迟加载
 _model = None
@@ -199,14 +203,19 @@ def _extract_preview(doc, source, meta):
         summary = f"表 {db}.{table}" + (f" — {desc}" if desc else '')
     return summary if summary else body[:200]
 
-def _vector_search(query: str, n: int = 20) -> list:
-    """向量语义搜索（内部方法，返回 top n 去重结果）"""
+def _vector_search(query: str, n: int = 20, collections: dict = None) -> list:
+    """向量语义搜索（内部方法，返回 top n 去重结果）
+
+    collections: dict[str, (col_name, weight)] —— 默认 KNOWLEDGE_COLLECTIONS（不含 DDL）。
+        用 DDL_COLLECTIONS 单独查表结构。
+    """
     client = get_client()
     model = get_model()
     q_embed = model.encode([query], normalize_embeddings=True).tolist()
 
+    cols = collections if collections is not None else KNOWLEDGE_COLLECTIONS
     all_results = []
-    for key, (col_name, weight) in COLLECTIONS.items():
+    for key, (col_name, weight) in cols.items():
         try:
             col = client.get_collection(col_name)
             if col.count() == 0:
@@ -251,17 +260,26 @@ def _vector_search(query: str, n: int = 20) -> list:
 
 
 def search_knowledge(query: str, n: int = 5) -> list:
-    """Hybrid Search: 向量 + BM25 + RRF 融合"""
-    # 两路并行搜索
-    vector_hits = _vector_search(query, n=20)
+    """Hybrid Search: 向量(summaries+chunks) + BM25 + RRF 融合。
+    DDL 表结构已独立到 search_ddl tool（避免 schema 字段名干扰文档检索）。
+    """
+    vector_hits = _vector_search(query, n=20, collections=KNOWLEDGE_COLLECTIONS)
     bm25_hits = _search_bm25(query, top_k=20)
+    # BM25 过滤 DDL source（与向量端对齐）
+    bm25_hits = [h for h in bm25_hits if h.get('source') != 'ddl']
 
-    # 如果 BM25 索引不可用，降级为纯向量搜索
     if not bm25_hits:
         return vector_hits[:n]
-
-    # RRF 融合
     return _rrf_merge(vector_hits, bm25_hits, k=60, top_n=n)
+
+
+def search_ddl(query: str, n: int = 5) -> list:
+    """专搜 DDL 表结构（库表名、字段、注释）。
+
+    用于查"哪张表存什么数据""字段名"等 schema 问题。
+    与 search_knowledge 对偶，不混入文档/笔记。
+    """
+    return _vector_search(query, n=n, collections=DDL_COLLECTIONS)
 
 def _ask_knowledge_full(question: str) -> tuple:
     """RAG + LLM 问答（内部版本，同时返回 docs 供日志记录）。"""
@@ -782,7 +800,19 @@ def handle_request(request):
             "tools": [
                 {
                     "name": "search_knowledge",
-                    "description": "在本地知识库中多集合语义搜索（文档摘要+段落chunks+DDL表结构），merge ranking 返回最相关结果。用于查找项目文档、技术方案、业务逻辑、SQL脚本、数据库表定义等。知识库包含商户画像、油价预测、标签清洗、AI基础设施等项目的文档。核心经营表: gas_dw.dwm_gas_merch_tag_store_df（DWM层油站标签宽表，包含全部15个标签字段）。",
+                    "description": "搜索本地知识库的文档/笔记/源码（不含 DDL 表结构）。Hybrid: 向量(BGE-M3 summaries+chunks) + BM25 + RRF 融合。用于查项目文档、技术方案、业务逻辑、Obsidian 笔记、Loki/FGW/商户雷达等项目文档。如果要查数据库表结构请用 search_ddl。",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "搜索关键词或问题，中文"},
+                            "n": {"type": "integer", "description": "返回结果数量，默认5", "default": 5}
+                        },
+                        "required": ["query"]
+                    }
+                },
+                {
+                    "name": "search_ddl",
+                    "description": "专搜 MySQL 数据库表结构（DDL：库表名、字段、注释）。用于查\"哪张表存什么数据\"\"字段定义\"等 schema 问题。核心经营表: gas_dw.dwm_gas_merch_tag_store_df（DWM层油站标签宽表，全部15个标签字段）。如果要查文档/笔记请用 search_knowledge。",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -919,6 +949,28 @@ def handle_request(request):
                     text += f"#{i+1} [{src_label}] [{match_label}] {score_info}\n"
                     text += f"   来源: {doc['path']}{heading}\n"
                     text += f"   内容: {doc['text'][:400]}\n\n"
+                send_response(id, {"content": [{"type": "text", "text": text}]})
+
+            elif tool_name == "search_ddl":
+                _q = args["query"]
+                _n_req = args.get("n", 5)
+                with QueryTimer() as _t:
+                    results = search_ddl(_q, _n_req)
+                log_query(
+                    tool="search_ddl",
+                    query=_q,
+                    n_requested=_n_req,
+                    n_returned=len(results),
+                    top_files=[r.get("topic", r.get("path", "")) for r in results[:5]],
+                    latency_ms=_t.latency_ms,
+                )
+                text = f"找到 {len(results)} 张相关表:\n\n"
+                for i, doc in enumerate(results):
+                    rrf = doc.get('rrf_score', '')
+                    score_info = f"RRF:{rrf}" if rrf else f"相关度:{doc['similarity']}"
+                    text += f"#{i+1} [DDL] {score_info}\n"
+                    text += f"   表: {doc.get('topic', '')}\n"
+                    text += f"   摘要: {doc['text'][:300]}\n\n"
                 send_response(id, {"content": [{"type": "text", "text": text}]})
 
             elif tool_name == "ask_knowledge":
