@@ -217,3 +217,13 @@
 - 单测 49 → 194（+145，4 个新模块全覆盖：state v2 / chroma GC / DDL filter / 代码截断 / BM25 cache / parse_weights）
 - 影响范围：8 commit + 4 OB 诊断笔记，server.py / 11 个 scripts / 6 个 tests / 1 plist
 - 关键决策：MVP 只采集不回写、最小变更优先（代码 chunk 完整方案留下次）、每改一个点都先单测
+
+## 2026-04-27 (二)
+- **第一性原理大重构**（治本前两件，质量反馈第三件留下次）：
+  - **准入闸 e8932ab**：is_excluded_path 强黑名单 (site-packages/.venv/python-sdk/_archive 等)，chroma 清退 53,087 条；扫描 148K → 10K (-93%)
+  - **DDL 剥离 9fd6eed**：search_ddl 独立 tool，search_knowledge 仅 summaries+chunks。Recall@5 27.5% → **57.5%** (+30pp)
+  - **fingerprint v3 6a22b52**：content_fingerprint(path, content) 替代 mtime hash；StateV2.is_doc_done(*fps) 多 fp 兼容平滑迁移
+- **pipeline 50× 提速**：1.8 文件/分钟 → 96 文件/分钟（昨晚 6.8 小时 736 文件 → 今天 30 分钟 2,883 文件）
+- 单测 218 → 233（+15）
+- 关键洞察：评估指标必须诚实暴露问题，5 万噪音背景下的"57.5%"是误导
+- 影响范围：3 commit，9 文件改动；新增 loki_scan_filter.py / loki_scan_cleanup.py / 测试 2 份；server.py 拆 KNOWLEDGE/DDL collections
