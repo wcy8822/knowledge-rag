@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.didi.loki</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/loki_pipeline_wrapper.sh</string>
+        <string>all</string>
+        <string>--max-files</string>
+        <string>1500</string>
+    </array>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>RunAtLoad</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>/tmp/loki-pipeline.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/loki-pipeline.err.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/didi/Work/projects/knowledge-rag-知识库/code/scripts</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/didi/mlx-env/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>Nice</key>
+    <integer>10</integer>
+</dict>
+</plist>
