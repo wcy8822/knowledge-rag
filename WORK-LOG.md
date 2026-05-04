@@ -1,5 +1,25 @@
 # 知识库 RAG — 工作日志
 
+## 2026-05-05
+
+### OpenAI 兼容 API 实现
+- 基于 server_http.py 新增 POST /v1/chat/completions + GET /v1/models
+- 双模型路由：loki-rag(RAG问答) / loki-search(纯检索)，支持 SSE streaming
+- 补齐 search_ddl + search_by_fields tool 注册和 call_tool 路由
+- CORS 全开，默认监听 0.0.0.0:8000
+- 新增 test_openai_api.py 13 个单元测试，全量 269 tests 通过
+- 影响范围：server_http.py +121/-11 行
+
+### GitHub 仓库化
+- 创建 wcy8822/knowledge-rag (public)
+- 排除敏感数据：模型(4.3GB)、向量(902MB)、BM25索引(211MB)、日志、状态文件
+- 更新 .gitignore 覆盖运行时产物
+- 46 commits, 265 源文件推送到 GitHub
+- 影响范围：.gitignore, README.md 重写
+
+### 依赖变更
+- 安装 fastapi 0.136.1 到 mlx-env（uvicorn 已有）
+
 ## 2026-04-03
 
 ### 文件重组

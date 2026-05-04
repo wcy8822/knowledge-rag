@@ -1,100 +1,85 @@
 # 交接文档
-更新时间: 2026-04-27 10:30
+更新时间: 2026-05-05 22:30
 
 ## 本轮共识
 
-第一性原理大重构 — 高质量向量化知识库还差三件，本会话治本前两件：
+1. **M5 本机 RAG 不传文件出机**：数据安全红线，SG 只能通过 HTTP API 调 RAG 结果，不传源文件
+2. **仓库化到 GitHub**：代码和文档公开，关键数据（模型/向量/索引/日志）不入库
+3. **按 P1 铁律执行**：备份→改→测试→提交，每步验证全量测试
 
-1. **准入闸**（白名单+强黑名单）→ 拦住 site-packages / .venv / 第三方库
-2. **fingerprint v3**（content hash 替代 mtime hash）→ 内容不变不重 embed
-3. ~~质量反馈~~ → 留下次（已埋点 queries.jsonl，等数据）
+## 本轮完成
 
-最大收益：清退 53,087 条噪音 + DDL 剥离独立 tool，**Recall@5 维持 57.5%**
-（在 chroma 从 62K 缩到 9.3K 的清洁状态下）。pipeline 速度 50× 提升。
-
-## 本轮完成（3 治本 commit + 1 收工）
-
-- [x] **准入闸 e8932ab**：site-packages/.venv/python-sdk 等强黑名单
-- [x] **53K 噪声清退**：summaries 62,317→9,309；chunks 38,035→37,956；state.docs 59,054→6,067
-- [x] **DDL 剥离 9fd6eed**：search_ddl 独立 tool；search_knowledge 不再含 DDL；Recall@5 27.5%→57.5%
-- [x] **fingerprint v3 6a22b52**：content_fingerprint(path, content) + StateV2.is_doc_done(*fps) 兼容判定
-- [x] pipeline 跑补漏（M 进行中，预计 30 分钟完成）：1.6 文件/秒，2,883 待补
-- [x] 单测 218 → **233**（+15：is_doc_done multi-fp + content_fingerprint）
-- [x] OB 笔记 [[202604271030+会话纪要-Loki第一性原理大重构]]
+- [x] **RAG 现状盘点**：完整 Markdown 报告 `M5-RAG现状盘点-OpenAI-API评估报告.md`
+- [x] **OpenAI 兼容 API `2f256ce`**：`/v1/chat/completions` + `/v1/models`，双模型(loki-rag/loki-search)，streaming SSE
+- [x] **补齐 tool `2f256ce`**：server_http.py 注册 search_ddl + search_by_fields
+- [x] **CORS + 默认端口 `2f256ce`**：监听 0.0.0.0:8000，CORS 全开
+- [x] **单元测试 `2f256ce`**：test_openai_api.py 13 tests（模型列表/对话/流式/多轮/错误处理）
+- [x] **仓库化 `85c3644`**：GitHub wcy8822/knowledge-rag，排除模型/向量/索引/日志/状态文件
+- [x] **README 更新 `c2a9f98`**：架构图 + MCP/OpenAI API 说明 + 快速启动
+- [x] **安装 fastapi `mlx-env`**：uvicorn 已有，补装 fastapi 0.136.1
+- [x] 单测 256 → **269**（+13），全绿
 
 ## 待办
 
-- [ ] **重启 Claude Desktop** 让 search_ddl 新 tool 注册生效（已加 tools/list）
-- [ ] **chroma 按 path 去重 GC 工具**：v3 切换后旧 mtime_fp id 与新 content_fp id 共存，需要保留最新 content_fp
-- [ ] 等今天 launchd 02:00 跑完看 BM25 cache 命中率（v3 后 fp 不同会缺命中，需要 sigs 也按 content）
-- [ ] 质量反馈第三件：cold files 自动清退 / hot files 加权 / zero-hit 提示补文档
-- [ ] 商户标签 15 个中文名从 tag_catalog 确认
-- [ ] 检查 server_http.py 是否需要同步 KNOWLEDGE_COLLECTIONS / DDL_COLLECTIONS
+- [ ] **SSH 反向隧道**：`ssh -R 18000:localhost:8000 user@154.193.243.169 -N` 建 M5→SG 隧道
+- [ ] **launchd 常驻**：写 `com.local.loki-http.plist`，server_http.py 保持运行
+- [ ] **Open WebUI 配置**：SG 上配 OpenAI API → `http://localhost:18000/v1`
+- [ ] **MLX LLM 链路确认**：检查 ollama-adapter 是否正常，MLX 服务是否需启动
+- [ ] **chroma 按 path 去重 GC**（上次遗留）：v3 fp 切换后旧 mtime_fp id 残留
+- [ ] **质量反馈闭环**（上次遗留）：cold files 自动清退 / hot files 加权
 
 ## 难点与风险
 
-- **fingerprint v3 副作用**：旧 chroma 中 mtime_fp 的 id 与新 content_fp id 不同，按 path 会出现新旧两份。state.docs 端会自然只保留新值（dict 覆盖），但 chroma 端需要 GC 工具按 path 去重。
-- **search_knowledge 现在不含 DDL**：如果 LLM 不主动调 search_ddl，DDL 召回为零。需要观察 queries.jsonl 看 LLM 是否会用 search_ddl。
-- **BM25 索引仍含 DDL**：BM25 重建后 cache hit 率会因 fp 变化大幅下降（首次跑后恢复）
-- **launchd 凌晨 02:00**：今晚跑会触发 v3 二次判定，但旧 chroma id 仍残留，召回结果可能短期混乱
-- **content_fingerprint 读所有文件 IO**：相比 mtime_fp 多读所有文件，但准入闸后只剩 10K 文件，IO 开销可控
+- **MLX LLM 链路**：当前 MLX 推理服务 (:3003) 未运行，LLM 问答可能失败。需确认 ollama-adapter 兼容性
+- **BGE-M3 加载慢**：server_http.py startup 已预加载，但首次请求仍有 5-10s 延迟
+- **ChromaDB 嵌入式**：不支持并发请求，多实例会锁冲突
+- **无公网 IP**：M5 只有内网 IP (10.10.10.103)，SG 可达性依赖 SSH 隧道
+- **内容外发**：用户明确禁止从本机传输文件，API 只返回检索结果和 LLM 答案
 
 ## 快速恢复指引
 
 ```bash
-# 1. 全套测试（233 应全绿）
-~/mlx-env/bin/python -m pytest /Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/tests/ -q
+# 1. 启动 OpenAI 兼容 API
+~/mlx-env/bin/python code/rag-mcp-server/server_http.py --host 0.0.0.0 --port 8000
 
-# 2. 验证 DDL 剥离效果
-~/mlx-env/bin/python /Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/loki_benchmark.py --phase2 --weights 'summaries=0.5,chunks=0.4,ddl=0.0'
-# 预期 Recall@5 = 57.5%
+# 2. 验证 API（M5 本机）
+curl http://localhost:8000/health
+curl http://localhost:8000/v1/models
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"loki-rag","messages":[{"role":"user","content":"PE监管要点"}]}'
 
-# 3. dry-run 准入清退（应显示 0 待清，因为已清完）
-~/mlx-env/bin/python /Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/loki_scan_cleanup.py --dry-run
+# 3. 全套测试（269 应全绿）
+~/mlx-env/bin/python -m pytest code/scripts/tests/ -q
 
-# 4. 状态自检
-launchctl list | grep -E "loki|gemma|ollama"
-~/mlx-env/bin/python -c "
-import chromadb, json
-c = chromadb.PersistentClient(path='/Users/didi/Work/data/vectors/data/chroma-doc-knowledge-bge')
-for n in ['doc_knowledge_bge_m3','doc_knowledge_chunks','ddl_schema_bge_m3']:
-    print(n, c.get_collection(n).count())
-s = json.loads(open('/Users/didi/Work/projects/knowledge-rag-知识库/code/scripts/logs/loki_state.json').read())
-print(f'state docs={len(s[\"docs\"])} ddl={len(s[\"ddl\"])}')
-"
+# 4. SSH 隧道（从 M5）
+ssh -R 18000:localhost:8000 user@154.193.243.169 -N
 
-# 5. 看 query 日志（重启后真实数据）
-cat /Users/didi/Work/projects/knowledge-rag-知识库/logs/queries.jsonl | tail
+# 5. GitHub
+git remote -v  # → origin git@github.com:wcy8822/knowledge-rag.git
 ```
 
-关键文件位置（本会话新增）：
+## 关键文件位置（本会话新增）
 
 ```
-# 准入闸
-code/scripts/loki_scan_filter.py        # is_excluded_path 强黑名单
-code/scripts/loki_scan_cleanup.py       # 一次性清退 chroma 脏数据
-code/scripts/tests/test_scan_filter.py  # 24 单测
+# OpenAI 兼容 API
+code/rag-mcp-server/server_http.py         # 主文件，含 /v1/chat/completions + /v1/models
+code/scripts/tests/test_openai_api.py      # 13 个 OpenAI 格式测试
 
-# DDL 剥离
-code/rag-mcp-server/server.py           # KNOWLEDGE_COLLECTIONS / DDL_COLLECTIONS
-                                          # search_ddl tool 注册
+# 文档
+M5-RAG现状盘点-OpenAI-API评估报告.md        # 完整盘点报告
+HANDOFF-m5pro-llm-integration.md           # MLX 推理栈交接
 
-# fingerprint v3
-code/scripts/loki_pipeline.py           # content_fingerprint + 二阶段判定
-code/scripts/loki_state.py              # is_doc_done(*fps) 多 fp 兼容
-code/scripts/tests/test_pipeline.py     # +8 content_fingerprint 测试
-code/scripts/tests/test_loki_state.py   # +7 multi-fp 测试
-
-# 备份产物
-logs/loki_scan_cleanup.summaries.20260427100327.jsonl  # 53,008 条
-logs/loki_scan_cleanup.chunks.20260427100327.jsonl     # 79 条
+# 备份
+code/rag-mcp-server/server_http.py.bak.*   # 改造前备份
 ```
 
-## 累积数据快照（截止 2026-04-27 10:30）
+## 累积数据快照（截止 2026-05-05）
 
-- chroma summaries: **9,309**（治理前 62,317）
-- chroma chunks: **37,956**（治理前 38,035）
-- chroma ddl: **484**
-- state.docs: **6,067** + 当前 pipeline 跑完后 → 约 **10,000**
-- 单测: **233 全绿**
+- chroma summaries: ~10,955
+- chroma chunks: 37,956
+- chroma ddl: 502
+- state.docs: 7,617
+- 单测: **269 全绿**
 - benchmark Recall@5: **57.5%**
+- GitHub: **wcy8822/knowledge-rag** (public, 46 commits, 265 files)
