@@ -33,12 +33,19 @@ Thumbs.db
 .env
 .env.*
 
-# 日志（pipeline 运行日志不入库，状态文件入库）
+# 日志 + 状态文件 + 二进制索引（运行时产物，不含入仓库）
 code/scripts/logs/*.log
-code/scripts/logs/benchmark_*.json
+code/scripts/logs/*.json
+code/scripts/logs/*.jsonl
+code/scripts/logs/*.pkl
+code/scripts/logs/*.pid
+logs/
 
 # ChromaDB 本地数据（通过 symlink 管理）
 *.sqlite3
 
 # 备份文件
 *.bak.*
+
+# Claude 本地配置
+.claude/
