@@ -49,3 +49,6 @@ logs/
 
 # Claude 本地配置
 .claude/
+
+# 遗留日志
+code/local-rag-system/logs/
