@@ -56,10 +56,10 @@ DB_CONFIG = dict(host='localhost', user='root',
                  password=_get_mysql_password(),
                  charset='utf8mb4', connect_timeout=5)
 
-BATCH_SIZE    = 4              # 2026-04-28 8→4：降单次显存峰值
+BATCH_SIZE    = 12             # M5+24G：4→12，摊平 GPU batch overhead
 MAX_CHARS     = 2000
-SLEEP_BATCH   = 1.0             # 2026-04-28 0.3→1.0：留 GC 时间
-MODEL_RELOAD_EVERY = 50         # 每 N 批彻底卸载并重建 model，释放 MPS context
+SLEEP_BATCH   = 0.2            # MPS leak 已修，0.2s 留一点 GC 余量即可
+_MODEL_RELOAD = False           # MPS context 泄漏已修复，不再需要周期性重建 model
 
 
 def _free_mps_memory(verbose: bool = False) -> None:
@@ -74,14 +74,6 @@ def _free_mps_memory(verbose: bool = False) -> None:
                 log.warning(f"  torch.mps.empty_cache 失败: {e}")
 
 
-def _reload_model(old_model) -> SentenceTransformer:
-    """彻底卸载旧 model，重建一个新的，释放 MPS 累积的 tensor cache。"""
-    log.info("  ♻️  周期性重建 model（释放 MPS context）...")
-    del old_model
-    _free_mps_memory()
-    new_model = SentenceTransformer(BGE_PATH)
-    _free_mps_memory()
-    return new_model
 
 # ========== 日志 ==========
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -202,7 +194,9 @@ def scan_files() -> list:
 
 # ========== Part 1: 文档向量化 ==========
 def run_docs(model, col, state: StateV2, max_files: int | None = None):
-    """返回 (state, model) — model 可能在循环中被周期重建，调用方需更新引用。"""
+    """返回 (state, model) — 并行读 + 批量化 embed 流水线。"""
+    import concurrent.futures
+
     log.info("=" * 60)
     log.info("Loki Part 1: 文档向量化 (MD/PDF/Office/SQL)")
 
@@ -211,68 +205,76 @@ def run_docs(model, col, state: StateV2, max_files: int | None = None):
 
     todo = [(f, mt) for f, mt in all_files
             if not state.is_doc_done(str(f), fingerprint(str(f), mt))]
-
     skipped = len(all_files) - len(todo)
     log.info(f"  待处理: {len(todo)} | 跳过已有: {skipped}")
 
-    # 单次硬上限（防 33GB 内存爆事故 2026-04-28）
     if max_files is not None and len(todo) > max_files:
         log.info(f"  ⚠️  --max-files={max_files} 触发：本次只处理前 {max_files} 个，"
                  f"剩余 {len(todo) - max_files} 个待下次跑")
         todo = todo[:max_files]
 
+    # ---- Phase 1: 并行读文件 + content-skip 判定 ----
+    # 用线程池把 I/O-bound 的文件读取从 GPU embed 循环中剥离，
+    # 8 个 worker 并行读盘，M5 NVMe 基本喂得饱 GPU
     success = failed = content_skip = 0
-    batch_idx = 0
-    for i in range(0, len(todo), BATCH_SIZE):
-        batch_idx += 1
-        # 周期性重建 model：释放 MPS 累积 cache（issue #154329 兜底）
-        if batch_idx > 1 and (batch_idx - 1) % MODEL_RELOAD_EVERY == 0:
-            model = _reload_model(model)
+    ready: list[tuple[Path, float, str, str]] = []  # (f, mtime, content_fp, body)
 
-        batch = todo[i:i+BATCH_SIZE]
+    def _read_one(item: tuple[Path, float]) -> tuple:
+        f, mt = item
+        try:
+            text = read_file(f).strip()
+            fp = content_fingerprint(str(f), text.encode("utf-8", errors="ignore"))
+            return (f, mt, text, fp, None)
+        except Exception as e:
+            return (f, mt, None, None, str(e))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        for f, mt, text, content_fp, err in pool.imap(_read_one, todo):
+            if err:
+                log.error(f"  FAIL {f.name}: {err}")
+                failed += 1
+                state.mark_doc(str(f), fingerprint(str(f), mt))
+                continue
+
+            mtime_fp = fingerprint(str(f), mt)
+            if state.is_doc_done(str(f), content_fp, mtime_fp):
+                state.mark_doc(str(f), content_fp)
+                content_skip += 1
+                continue
+
+            if len(text) < 30:
+                log.info(f"  SKIP(空) {f.name}")
+                state.mark_doc(str(f), content_fp)
+                content_skip += 1
+                continue
+
+            body = extract_for_embed(f, text)
+            ready.append((f, mt, content_fp, body))
+
+    # ---- Phase 2: 批量 embed + chroma 入库 ----
+    for i in range(0, len(ready), BATCH_SIZE):
+        batch = ready[i:i+BATCH_SIZE]
         ids, docs, metas, paths = [], [], [], []
 
-        for f, mt in batch:
-            mtime_fp = fingerprint(str(f), mt)
-            try:
-                text = read_file(f).strip()
-
-                # v3 二次判定：mtime 变但 content 没变 → 跳过（不重 embed）
-                content_fp = content_fingerprint(str(f), text.encode("utf-8", errors="ignore"))
-                if state.is_doc_done(str(f), content_fp, mtime_fp):
-                    state.mark_doc(str(f), content_fp)  # 升级到 v3 格式
-                    content_skip += 1
-                    continue
-
-                if len(text) < 30:
-                    log.info(f"  SKIP(空) {f.name}")
-                    state.mark_doc(str(f), content_fp)
-                    continue
-
-                # 代码文件走 head+tail 智能提取（保留 imports/main），文档保持 head 截断
-                body = extract_for_embed(f, text)
-                embed_text = f"文件:{f.name}\n{body}"
-                ids.append(content_fp)  # v3: chroma id = content_fp
-                docs.append(embed_text)
-                metas.append({
-                    'path': str(f),
-                    'name': f.name,
-                    'ext': f.suffix.lower(),
-                    'mtime': mt,
-                    'content_fp': content_fp,
-                    'source': 'loki_docs',
-                })
-                paths.append(str(f))
-                log.info(f"  [{i+len(ids)}/{len(todo)}] {f.suffix} {f.name}")
-            except Exception as e:
-                log.error(f"  FAIL {f.name}: {e}")
-                failed += 1
-                state.mark_doc(str(f), mtime_fp)  # 失败用 mtime_fp 登记避免反复卡住
+        for f, mt, content_fp, body in batch:
+            embed_text = f"文件:{f.name}\n{body}"
+            ids.append(content_fp)
+            docs.append(embed_text)
+            metas.append({
+                'path': str(f),
+                'name': f.name,
+                'ext': f.suffix.lower(),
+                'mtime': mt,
+                'content_fp': content_fp,
+                'source': 'loki_docs',
+            })
+            paths.append(str(f))
+            log.info(f"  [{i+len(ids)}/{len(ready)}] {f.suffix} {f.name}")
 
         if not ids:
             continue
+
         try:
-            # 批内去重（防止同名文件fingerprint碰撞，保留首条）
             seen, u_ids, u_docs, u_metas, u_paths = set(), [], [], [], []
             for id_, doc_, meta_, p_ in zip(ids, docs, metas, paths):
                 if id_ not in seen:
@@ -286,13 +288,12 @@ def run_docs(model, col, state: StateV2, max_files: int | None = None):
             for path_, fp_item in zip(paths, ids):
                 state.mark_doc(path_, fp_item)
             success += len(ids)
-            save_state(state)  # 每批持久化
+            save_state(state)
             log.info(f"  ✅ 批次入库 {len(ids)} 条 (总计 {col.count()})")
         except Exception as e:
             log.error(f"  FAIL 入库: {e}")
             failed += len(ids)
         finally:
-            # 每批必清：释放 embeddings + MPS cache，防 PyTorch issue #154329
             try:
                 del embeddings
             except NameError:

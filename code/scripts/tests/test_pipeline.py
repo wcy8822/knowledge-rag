@@ -16,12 +16,12 @@ class TestMemoryHygiene:
         _free_mps_memory()
         _free_mps_memory(verbose=True)
 
-    def test_constants_lowered(self):
-        """BATCH_SIZE / SLEEP_BATCH / MODEL_RELOAD_EVERY 已按事故复盘下调/新增。"""
-        from loki_pipeline import BATCH_SIZE, SLEEP_BATCH, MODEL_RELOAD_EVERY
-        assert BATCH_SIZE <= 4, "BATCH_SIZE 应 ≤ 4 防显存峰值"
-        assert SLEEP_BATCH >= 1.0, "SLEEP_BATCH 应 ≥ 1.0 给 GC 时间"
-        assert MODEL_RELOAD_EVERY > 0
+    def test_constants_optimized(self):
+        """BATCH_SIZE / SLEEP_BATCH 按 M5+24G 性能压榨调整。"""
+        from loki_pipeline import BATCH_SIZE, SLEEP_BATCH, _MODEL_RELOAD
+        assert BATCH_SIZE >= 8, "BATCH_SIZE 应 ≥ 8 充分利用 M5 GPU"
+        assert 0 < SLEEP_BATCH < 0.5, "SLEEP_BATCH 应 < 0.5s，MPS leak 已修"
+        assert _MODEL_RELOAD is False, "模型重建已关闭"
 
 
 class TestParseArgs:
