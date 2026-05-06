@@ -37,8 +37,9 @@ EXCLUDE_DIRS = {'.obsidian', 'Templates', 'node_modules', '__pycache__',
 SUPPORTED_EXT = {'.md', '.pdf', '.docx', '.xlsx', '.pptx', '.txt', '.sql',
                   '.py', '.sh', '.yaml', '.yml'}
 
-COLLECTION_DOCS = "doc_knowledge_bge_m3"
-COLLECTION_DDL  = "ddl_schema_bge_m3"
+COLLECTION_DOCS   = "doc_knowledge_bge_m3"
+COLLECTION_DDL    = "ddl_schema_bge_m3"
+COLLECTION_CHUNKS = "doc_knowledge_chunks"
 LOCK_FILE = Path("/Users/didi/Work/data/vectors/data/chroma-doc-knowledge-bge/.loki_write.lock")
 
 def _get_mysql_password():
@@ -405,6 +406,167 @@ def run_ddl(model, col, state: StateV2) -> StateV2:
     log.info(f"Part 2 完成: 成功={success} 失败={failed} DDL总量={col.count()}")
     return state
 
+# ========== Part 2: 长文档分块 ==========
+
+CHUNK_EXTS = {'.md', '.pdf', '.docx', '.txt'}
+CHUNK_MIN_SIZE = 3000
+CHUNK_SKIP_SIZE = 5_000_000
+
+def _is_chunk_candidate(f: Path) -> bool:
+    if f.suffix.lower() not in CHUNK_EXTS:
+        return False
+    try:
+        st = f.stat()
+        if st.st_size < CHUNK_MIN_SIZE:
+            return False
+        if st.st_size > CHUNK_SKIP_SIZE:
+            return False
+        name = f.name
+        if name == '外部笔记索引.md':
+            return False
+        if name.startswith('cursor_') and st.st_size > 10_000_000:
+            return False
+        if name.startswith('backup_') and name.endswith('.sql'):
+            return False
+    except OSError:
+        return False
+    return True
+
+
+def run_chunks(model, col, state: StateV2):
+    import concurrent.futures
+    from loki_chunk import get_chunks, chunk_pdf_pages
+
+    log.info("=" * 60)
+    log.info("Part 2: 长文档分块向量化 (>3KB 文件按语义切块)")
+
+    all_files = scan_files()
+    candidates = [(f, mt) for f, mt in all_files if _is_chunk_candidate(f)]
+    log.info(f"  扫描到可切块文件: {len(candidates)}")
+
+    todo = []
+    success = failed = content_skip = 0
+
+    def _read_one(item):
+        f, mt = item
+        try:
+            text = read_file(f).strip() if f.suffix.lower() != '.pdf' else ''
+            fp = content_fingerprint(str(f), text.encode("utf-8", errors="ignore"))
+            return (f, mt, text, fp, None)
+        except Exception as e:
+            return (f, mt, None, None, str(e))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        for f, mt, text, content_fp, err in pool.imap(_read_one, candidates):
+            if err:
+                log.error(f"  FAIL {f.name}: {err}")
+                failed += 1
+                continue
+            if state.is_chunk_done(str(f), content_fp):
+                content_skip += 1
+                continue
+            todo.append((f, content_fp, text))
+
+    log.info(f"  待切块: {len(todo)} | 跳过已有: {content_skip} | 失败: {failed}")
+
+    all_ids, all_docs, all_metas = [], [], []
+    total_chunks = 0
+
+    for file_idx, (f, fp, text) in enumerate(todo):
+        try:
+            if f.suffix.lower() == '.pdf':
+                raw = read_file(f).strip()
+                chunks_data = chunk_pdf_pages(f) if raw else []
+            else:
+                raw = text or read_file(f).strip()
+                chunks_data = get_chunks(f, raw)
+
+            if not chunks_data:
+                state.mark_chunk(str(f), fp)
+                continue
+
+            rel_path = str(f)
+            for base in SCAN_DIRS:
+                if rel_path.startswith(base):
+                    rel_path = rel_path[len(base):].lstrip('/')
+                    break
+
+            for ci, chunk in enumerate(chunks_data):
+                chunk_id = f"{fp}_chunk_{ci:03d}"
+                chunk_text = chunk['text']
+                embed_text = f"文件:{f.name}\n块:{ci+1}/{len(chunks_data)}\n---\n{chunk_text[:1500]}"
+                all_ids.append(chunk_id)
+                all_docs.append(embed_text)
+                all_metas.append({
+                    'source_file': rel_path,
+                    'chunk_index': ci,
+                    'total_chunks': len(chunks_data),
+                    'heading': chunk.get('heading', '')[:200],
+                    'ext': f.suffix.lower(),
+                    'file_id': fp,
+                    'type': chunk.get('type', 'narrative'),
+                    'char_count': len(chunk_text),
+                    'source': 'loki_chunk',
+                })
+
+            state.mark_chunk(str(f), fp)
+            success += 1
+            total_chunks += len(chunks_data)
+            log.info(f"  [{file_idx+1}/{len(todo)}] {f.name} -> {len(chunks_data)} chunks")
+        except Exception as e:
+            log.error(f"  FAIL {f.name}: {e}")
+            failed += 1
+
+    if all_ids:
+        for bi in range(0, len(all_ids), BATCH_SIZE):
+            b_ids = all_ids[bi:bi+BATCH_SIZE]
+            b_docs = all_docs[bi:bi+BATCH_SIZE]
+            b_metas = all_metas[bi:bi+BATCH_SIZE]
+            try:
+                embeddings = model.encode(b_docs, normalize_embeddings=True,
+                                          show_progress_bar=False).tolist()
+                col.upsert(ids=b_ids, documents=b_docs, metadatas=b_metas,
+                          embeddings=embeddings)
+                log.info(f"  ✅ chunk 批次入库 {len(b_ids)} 条 (chunk 库={col.count()})")
+            except Exception as e:
+                log.error(f"  FAIL chunk 入库 batch {bi}: {e}")
+                failed += len(b_ids)
+            finally:
+                _free_mps_memory()
+
+    _gc_chunk_orphans(col, state)
+    log.info(f"Part 2 完成: 文件={success} 失败={failed} 总chunk={total_chunks} 库总量={col.count()}")
+    return state
+
+
+def _gc_chunk_orphans(col, state):
+    total = col.count()
+    if total == 0:
+        return
+
+    valid_file_ids = set(fp for fp in state.chunks.values())
+
+    all_ids = []
+    offset = 0
+    while offset < total:
+        result = col.get(limit=1000, offset=offset, include=[])
+        ids = result.get('ids') or []
+        if not ids:
+            break
+        all_ids.extend(ids)
+        offset += 1000
+
+    orphans = [cid for cid in all_ids
+               if '_chunk_' in cid and cid.split('_chunk_')[0] not in valid_file_ids]
+
+    if orphans:
+        for i in range(0, len(orphans), 100):
+            col.delete(ids=orphans[i:i+100])
+        log.info(f"  GC: 已删除 {len(orphans)} 条孤儿 chunk (库剩余 {col.count()})")
+    else:
+        log.info(f"  GC: 无孤儿 chunk")
+
+
 # ========== BM25 索引 rebuild ==========
 BM25_INDEX_PATH = LOG_DIR / "bm25_index.pkl"
 USERDICT_PATH   = Path(__file__).parent / "loki_userdict.txt"
@@ -573,13 +735,17 @@ def main():
                        metadata={"hnsw:space": "cosine"})
         col_ddl  = client.get_or_create_collection(COLLECTION_DDL,
                        metadata={"hnsw:space": "cosine"})
+        col_chunks = client.get_or_create_collection(COLLECTION_CHUNKS,
+                         metadata={"hnsw:space": "cosine"})
 
         state = load_state()
-        log.info(f"  已处理状态: docs={len(state.docs)} ddl={len(state.ddl)}")
+        log.info(f"  已处理状态: docs={len(state.docs)} chunks={len(state.chunks)} ddl={len(state.ddl)}")
 
         t0 = time.time()
         if mode in ('all', 'docs'):
             state, model = run_docs(model, col_docs, state, max_files=max_files)
+        if mode in ('all', 'chunks'):
+            state = run_chunks(model, col_chunks, state)
         if mode in ('all', 'ddl'):
             state = run_ddl(model, col_ddl, state)
 
@@ -592,6 +758,7 @@ def main():
         log.info("=" * 60)
         log.info(f"Loki 完成 耗时={elapsed:.1f}分钟")
         log.info(f"  文档库: {col_docs.count()} 条")
+        log.info(f"  Chunk库: {col_chunks.count()} 条")
         log.info(f"  DDL库:  {col_ddl.count()} 条")
         log.info(f"  日志:   {log_file}")
     finally:

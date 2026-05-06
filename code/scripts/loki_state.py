@@ -28,7 +28,8 @@ from pathlib import Path
 
 @dataclass
 class StateV2:
-    docs: dict = field(default_factory=dict)   # path -> fingerprint
+    docs: dict = field(default_factory=dict)   # path -> fingerprint (summaries)
+    chunks: dict = field(default_factory=dict) # path -> fingerprint (chunks)
     ddl: set = field(default_factory=set)      # set of DDL md5
 
     # ---- I/O ----
@@ -51,6 +52,7 @@ class StateV2:
         if isinstance(raw, dict) and raw.get("version") == 2:
             return cls(
                 docs=dict(raw.get("docs") or {}),
+                chunks=dict(raw.get("chunks") or {}),
                 ddl=set(raw.get("ddl") or []),
             )
         if isinstance(raw, list):
@@ -79,7 +81,7 @@ class StateV2:
 
     def to_json(self) -> str:
         return json.dumps(
-            {"version": 2, "docs": self.docs, "ddl": sorted(self.ddl)},
+            {"version": 2, "docs": self.docs, "chunks": self.chunks, "ddl": sorted(self.ddl)},
             ensure_ascii=False,
         )
 
@@ -106,10 +108,21 @@ class StateV2:
     def mark_ddl(self, md5: str) -> None:
         self.ddl.add(md5)
 
+    # ---- chunk 判定 ----
+
+    def is_chunk_done(self, path: str, *fps: str) -> bool:
+        cur = self.chunks.get(str(path))
+        if cur is None:
+            return False
+        return any(cur == fp for fp in fps if fp)
+
+    def mark_chunk(self, path: str, fp: str) -> None:
+        self.chunks[str(path)] = fp
+
     # ---- 统计 ----
 
     def __len__(self) -> int:
-        return len(self.docs) + len(self.ddl)
+        return len(self.docs) + len(self.chunks) + len(self.ddl)
 
 
 _HEX32_RE = None
