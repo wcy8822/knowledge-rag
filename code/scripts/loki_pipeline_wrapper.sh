@@ -15,9 +15,9 @@ PYTHON="/Users/didi/mlx-env/bin/python"
 PIPELINE="$SCRIPT_DIR/loki_pipeline.py"
 LOG_DIR="$SCRIPT_DIR/logs"
 
-# 内存硬上限：12 GB RSS（M5 Pro 24GB 物理，留一半给系统/其他 app）
+# 内存硬上限：18 GB RSS（M5 Pro 24GB 物理，用户指定跑满到 18G）
 # macOS 注意：ulimit -v/-d/-m 在 Darwin 都不生效，必须用后台监控进程兜底
-MEM_LIMIT_MB=12288           # 12 * 1024
+MEM_LIMIT_MB=18432           # 18 * 1024
 
 # 监控周期：每 30 秒检查一次 RSS
 WATCH_INTERVAL_SEC=30
@@ -27,16 +27,16 @@ CPU_LIMIT_SEC=5400
 
 # 默认参数
 MODE="${1:-all}"
-shift || true
+shift 2>/dev/null || true
 EXTRA_ARGS=("$@")
 
-# 若用户没传 --max-files，注入默认 1500
+# 若用户没传 --max-files，默认全部处理（50000 > 当前 15876 文件总量）
 HAS_MAX=false
 for a in "${EXTRA_ARGS[@]:-}"; do
     [[ "${a:-}" == --max-files* ]] && HAS_MAX=true
 done
 if ! $HAS_MAX; then
-    EXTRA_ARGS+=(--max-files 1500)
+    EXTRA_ARGS+=(--max-files 50000)
 fi
 
 mkdir -p "$LOG_DIR"

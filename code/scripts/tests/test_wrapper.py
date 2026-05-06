@@ -44,7 +44,7 @@ class TestWrapperGuards:
         m = re.search(r"MEM_LIMIT_MB=(\d+)", self.content)
         assert m, "缺 MEM_LIMIT_MB"
         limit = int(m.group(1))
-        assert 4096 <= limit <= 16384, f"MEM_LIMIT_MB={limit} 应在 4-16GB 之间"
+        assert 4096 <= limit <= 20480, f"MEM_LIMIT_MB={limit} 应在 4-20GB 之间（当前 M5 24GB 物理）"
 
     def test_has_cpu_time_limit(self):
         """必须有 CPU 时间上限（macOS 唯一可用 ulimit）。"""
