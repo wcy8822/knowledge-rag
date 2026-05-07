@@ -433,7 +433,7 @@ def _is_chunk_candidate(f: Path) -> bool:
     return True
 
 
-def run_chunks(model, col, state: StateV2):
+def run_chunks(model, col, state: StateV2, max_files=None):
     import concurrent.futures
     from loki_chunk import get_chunks, chunk_pdf_pages
 
@@ -468,6 +468,11 @@ def run_chunks(model, col, state: StateV2):
             todo.append((f, content_fp, text))
 
     log.info(f"  待切块: {len(todo)} | 跳过已有: {content_skip} | 失败: {failed}")
+
+    if max_files is not None and len(todo) > max_files:
+        log.info(f"  ⚠️  --max-files={max_files} 触发 (chunks)：本次只处理前 {max_files} 个，"
+                 f"剩余 {len(todo) - max_files} 个待下次跑")
+        todo = todo[:max_files]
 
     all_ids, all_docs, all_metas = [], [], []
     total_chunks = 0
@@ -745,7 +750,7 @@ def main():
         if mode in ('all', 'docs'):
             state, model = run_docs(model, col_docs, state, max_files=max_files)
         if mode in ('all', 'chunks'):
-            state = run_chunks(model, col_chunks, state)
+            state = run_chunks(model, col_chunks, state, max_files=max_files)
         if mode in ('all', 'ddl'):
             state = run_ddl(model, col_ddl, state)
 

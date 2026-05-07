@@ -279,3 +279,38 @@ class TestParallelIOPipeline:
             results = list(pool.map(_read_one, items))
         assert results == [(0, 'A', None), (1, 'B', None), (2, 'C', None), (3, 'D', None)], \
             "ThreadPoolExecutor.map 应按输入顺序返回结果"
+
+
+class TestChunksMaxFilesLimit:
+    """2026-05-07 chunks 限流：防 daily pipeline 撞 wrapper 90 分钟 CPU 上限。
+    a32e321 引入 chunks 全量 backfill (9496 文件) 而无 max_files 限制，
+    会让每天 02:00 launchd 必撞超时。run_chunks 应接受 max_files 参数。"""
+
+    def test_run_chunks_accepts_max_files(self):
+        """run_chunks 函数签名必须有 max_files 可选参数（默认 None 向后兼容）。"""
+        import inspect
+        from loki_pipeline import run_chunks
+        sig = inspect.signature(run_chunks)
+        assert 'max_files' in sig.parameters, \
+            "run_chunks 必须接受 max_files 参数防 daily pipeline 超时"
+        assert sig.parameters['max_files'].default is None, \
+            "max_files 默认应为 None（不限流），保持向后兼容"
+
+    def test_main_passes_max_files_to_run_chunks(self):
+        """main() 必须把命令行的 max_files 同时传给 run_docs 和 run_chunks。"""
+        from pathlib import Path
+        src = Path(__file__).parent.parent / "loki_pipeline.py"
+        text = src.read_text(encoding="utf-8")
+        # 既要 run_docs 传 max_files，也要 run_chunks 传 max_files
+        assert "run_chunks(model, col_chunks, state, max_files=max_files)" in text, \
+            "main() 必须把 max_files 传给 run_chunks，否则 chunks 全量跑会撞超时"
+
+    def test_run_chunks_has_max_files_truncation(self):
+        """run_chunks 内部必须有 max_files 截断逻辑（与 run_docs 风格对齐）。"""
+        from pathlib import Path
+        src = Path(__file__).parent.parent / "loki_pipeline.py"
+        text = src.read_text(encoding="utf-8")
+        # 截断逻辑特征：max_files is not None 判断 + todo 切片
+        assert "max_files is not None" in text, "应有 max_files is not None 判断"
+        # chunks 限流日志特征
+        assert "(chunks)" in text, "chunks 限流日志应可识别"
