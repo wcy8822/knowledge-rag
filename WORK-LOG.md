@@ -1,5 +1,18 @@
 # 知识库 RAG — 工作日志
 
+## 2026-05-07 (上午)
+
+### Loki 凌晨 launchd 整夜 crash 定位 + 双修复 + chunks 限流 + 一次性 backfill
+
+- 5-7 02:00 整夜 pipeline 零产出，根因为 5-7 00:54 [`2bbc903`](https://github.com/wcy8822/knowledge-rag/commit/2bbc903) 引入并行 I/O 时 `ThreadPoolExecutor.imap` API 误用（应为 `.map`）
+- 修两处同模式 bug + 3 回归单测（含静态源码扫描防御）— [`0806124`](https://github.com/wcy8822/knowledge-rag/commit/0806124)
+- 副发现 [`a32e321`](https://github.com/wcy8822/knowledge-rag/commit/a32e321) chunks 全量 backfill 9496 文件需 2.5h 会撞 wrapper 90 分钟上限
+- 给 `run_chunks` 加 `max_files` 参数 + 3 回归单测 — [`b7d47c9`](https://github.com/wcy8822/knowledge-rag/commit/b7d47c9)
+- 后台手动跑一次性 backfill 补完历史欠债（37956 → ~85000 chunks），今晚 02:00 launchd 进入稳态增量
+- 单测 269 → 292 全绿，2 commit 已 push GitHub
+
+📌 详细 OB: [[202605071100+会话纪要-Loki并行IO修复+chunks限流防超时]]
+
 ## 2026-05-05
 
 ### OpenAI 兼容 API 实现

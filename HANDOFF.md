@@ -1,85 +1,80 @@
 # 交接文档
-更新时间: 2026-05-05 22:30
+更新时间: 2026-05-07 11:00
 
 ## 本轮共识
 
-1. **M5 本机 RAG 不传文件出机**：数据安全红线，SG 只能通过 HTTP API 调 RAG 结果，不传源文件
-2. **仓库化到 GitHub**：代码和文档公开，关键数据（模型/向量/索引/日志）不入库
-3. **按 P1 铁律执行**：备份→改→测试→提交，每步验证全量测试
+1. **API 误用比逻辑 bug 更阴险**：`pool.imap()` 在编辑器没 lint 错，单测又没真实跑过并行管道（被 mock 掉），5-7 00:54 commit 当夜过 5 小时直接生产事故 — 回归测试必须有"源码静态扫描"防御
+2. **一次性事件用一次性方案，长期问题用长期方案**：chunks 9496 全量 backfill 是历史欠债（手动跑一次），daily 增量 50-200 是稳态（max-files 限流），不混在一起跑就不会撞 wrapper 90 分钟上限
+3. **fact-forcing gate 是好护栏**：每次 Edit/Write 前必须列引用方/影响符号/数据 schema/用户原话 4 项事实
 
 ## 本轮完成
 
-- [x] **RAG 现状盘点**：完整 Markdown 报告 `M5-RAG现状盘点-OpenAI-API评估报告.md`
-- [x] **OpenAI 兼容 API `2f256ce`**：`/v1/chat/completions` + `/v1/models`，双模型(loki-rag/loki-search)，streaming SSE
-- [x] **补齐 tool `2f256ce`**：server_http.py 注册 search_ddl + search_by_fields
-- [x] **CORS + 默认端口 `2f256ce`**：监听 0.0.0.0:8000，CORS 全开
-- [x] **单元测试 `2f256ce`**：test_openai_api.py 13 tests（模型列表/对话/流式/多轮/错误处理）
-- [x] **仓库化 `85c3644`**：GitHub wcy8822/knowledge-rag，排除模型/向量/索引/日志/状态文件
-- [x] **README 更新 `c2a9f98`**：架构图 + MCP/OpenAI API 说明 + 快速启动
-- [x] **安装 fastapi `mlx-env`**：uvicorn 已有，补装 fastapi 0.136.1
-- [x] 单测 256 → **269**（+13），全绿
+5-7 凌晨 02:00 launchd 整夜 crash 定位 + 双修复 + chunks 限流 + 一次性 backfill。详见 [[202605071100+会话纪要-Loki并行IO修复+chunks限流防超时]]
+
+- ✅ **修 ThreadPool API 误用** [`0806124`](https://github.com/wcy8822/knowledge-rag/commit/0806124)：`pool.imap` → `pool.map` 两处 + 3 回归单测（已 push）
+- ✅ **chunks 限流** [`b7d47c9`](https://github.com/wcy8822/knowledge-rag/commit/b7d47c9)：`run_chunks` 加 `max_files` 参数 + 3 回归单测（已 push）
+- ✅ **一次性 backfill 后台跑**：chunk 库 37956 → 77172（截止 10:55，预计 11:30 跑完到 ~85000）
+- ✅ **全量 pytest 269 → 292 全绿**
 
 ## 待办
 
-- [ ] **SSH 反向隧道**：`ssh -R 18000:localhost:8000 user@154.193.243.169 -N` 建 M5→SG 隧道
-- [ ] **launchd 常驻**：写 `com.local.loki-http.plist`，server_http.py 保持运行
+- [ ] **明早查 logs/loki_20260508_*.log** 确认今晚 02:00 launchd 第一次跑新代码稳定
+- [ ] **SSH 反向隧道**：`ssh -R 18000:localhost:8000 user@154.193.243.169 -N`
+- [ ] **launchd 常驻 server_http**：写 `com.local.loki-http.plist`
 - [ ] **Open WebUI 配置**：SG 上配 OpenAI API → `http://localhost:18000/v1`
-- [ ] **MLX LLM 链路确认**：检查 ollama-adapter 是否正常，MLX 服务是否需启动
-- [ ] **chroma 按 path 去重 GC**（上次遗留）：v3 fp 切换后旧 mtime_fp id 残留
-- [ ] **质量反馈闭环**（上次遗留）：cold files 自动清退 / hot files 加权
+- [ ] **MLX LLM 链路确认**：检查 ollama-adapter 是否正常
+- [ ] **chroma 按 path 去重 GC**（5-5 遗留）
+- [ ] **质量反馈闭环**（5-5 遗留）：cold files 自动清退 / hot files 加权
 
 ## 难点与风险
 
-- **MLX LLM 链路**：当前 MLX 推理服务 (:3003) 未运行，LLM 问答可能失败。需确认 ollama-adapter 兼容性
-- **BGE-M3 加载慢**：server_http.py startup 已预加载，但首次请求仍有 5-10s 延迟
-- **ChromaDB 嵌入式**：不支持并发请求，多实例会锁冲突
-- **无公网 IP**：M5 只有内网 IP (10.10.10.103)，SG 可达性依赖 SSH 隧道
-- **内容外发**：用户明确禁止从本机传输文件，API 只返回检索结果和 LLM 答案
+- **backfill 进程未结束**：PID 51309 后台跑（截止 10:55 已 1h20min），如果 11:30 前 chunk 库不再涨 → `kill -TERM 51309` 软停，已入库不丢
+- **今晚 02:00 launchd 验证窗口**：明早第一件事查 wrapper log 确认无 crash
+- **MLX 推理服务 (:3003) 仍未确认运行状态**（5-5 遗留）
 
 ## 快速恢复指引
 
 ```bash
-# 1. 启动 OpenAI 兼容 API
+# 1. 看 backfill 进度
+tail -3 code/scripts/logs/loki_20260507_093543.log
+ps -o pid,etime,rss,%cpu -p 51309 2>/dev/null
+
+# 2. 启动 OpenAI 兼容 API
 ~/mlx-env/bin/python code/rag-mcp-server/server_http.py --host 0.0.0.0 --port 8000
 
-# 2. 验证 API（M5 本机）
-curl http://localhost:8000/health
-curl http://localhost:8000/v1/models
-curl -X POST http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"loki-rag","messages":[{"role":"user","content":"PE监管要点"}]}'
-
-# 3. 全套测试（269 应全绿）
+# 3. 全量测试（292 应全绿）
 ~/mlx-env/bin/python -m pytest code/scripts/tests/ -q
 
-# 4. SSH 隧道（从 M5）
-ssh -R 18000:localhost:8000 user@154.193.243.169 -N
+# 4. 健康检查
+~/mlx-env/bin/python code/scripts/loki_health.py
 
-# 5. GitHub
-git remote -v  # → origin git@github.com:wcy8822/knowledge-rag.git
+# 5. 应急三档（盯 backfill 用）
+kill -TERM 51309    # 软停（推荐）
+kill -9 51309       # 硬停（软停不响应）
+ls vectors/data/chroma-*/chroma.lock 2>/dev/null  # 检查残留锁
 ```
 
 ## 关键文件位置（本会话新增）
 
 ```
-# OpenAI 兼容 API
-code/rag-mcp-server/server_http.py         # 主文件，含 /v1/chat/completions + /v1/models
-code/scripts/tests/test_openai_api.py      # 13 个 OpenAI 格式测试
+# 修复点
+code/scripts/loki_pipeline.py:232,459       # 并行 I/O pool.map (修 imap 误用)
+code/scripts/loki_pipeline.py:436           # run_chunks(..., max_files=None)
+code/scripts/loki_pipeline.py:472           # chunks max-files 截断
 
-# 文档
-M5-RAG现状盘点-OpenAI-API评估报告.md        # 完整盘点报告
-HANDOFF-m5pro-llm-integration.md           # MLX 推理栈交接
+# 回归单测
+code/scripts/tests/test_pipeline.py:248-321 # TestParallelIOPipeline + TestChunksMaxFilesLimit (6)
 
-# 备份
-code/rag-mcp-server/server_http.py.bak.*   # 改造前备份
+# OB 纪要
+Inbox/202605071100+会话纪要-Loki并行IO修复+chunks限流防超时.md
 ```
 
-## 累积数据快照（截止 2026-05-05）
+## 累积数据快照（截止 2026-05-07 11:00）
 
-- chroma summaries: ~10,955
-- chroma chunks: 37,956
-- chroma ddl: 502
-- state.docs: 7,617
-- 单测: **269 全绿**
-- benchmark Recall@5: **57.5%**
-- GitHub: **wcy8822/knowledge-rag** (public, 46 commits, 265 files)
+- chroma summaries: ~11,030
+- chroma chunks: **跑后预计 ~85,000**（5-5 是 37,956，本会话 backfill 全量补完）
+- chroma ddl: 511
+- state.docs: 7,656
+- 单测: **292 全绿**（5-5 是 269）
+- GitHub: [wcy8822/knowledge-rag](https://github.com/wcy8822/knowledge-rag) 48 commits（5-5 是 46）
+- launchd: `com.didi.loki` 每天 02:00 跑 `wrapper.sh all --max-files 1500`，wrapper 18GB RSS + 90 分钟 CPU 上限
