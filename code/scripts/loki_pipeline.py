@@ -230,7 +230,7 @@ def run_docs(model, col, state: StateV2, max_files: int | None = None):
             return (f, mt, None, None, str(e))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        for f, mt, text, content_fp, err in pool.imap(_read_one, todo):
+        for f, mt, text, content_fp, err in pool.map(_read_one, todo):
             if err:
                 log.error(f"  FAIL {f.name}: {err}")
                 failed += 1
@@ -457,7 +457,7 @@ def run_chunks(model, col, state: StateV2):
             return (f, mt, None, None, str(e))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        for f, mt, text, content_fp, err in pool.imap(_read_one, candidates):
+        for f, mt, text, content_fp, err in pool.map(_read_one, candidates):
             if err:
                 log.error(f"  FAIL {f.name}: {err}")
                 failed += 1

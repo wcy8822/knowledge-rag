@@ -243,3 +243,39 @@ class TestContentFingerprint:
         mfp = fingerprint("/a.md", 1234567890.0)
         # 极小概率碰撞，但实际算出来一定不同
         assert cfp != mfp
+
+
+class TestParallelIOPipeline:
+    """2026-05-07 回归防御：concurrent.futures.ThreadPoolExecutor 没有 .imap()，
+    只能用 .map()。5-7 凌晨 02:00 launchd 整夜 pipeline 因 AttributeError crash。"""
+
+    def test_threadpool_has_map_not_imap(self):
+        """ThreadPoolExecutor 必须用 map（imap 是 multiprocessing.Pool 的 API）。"""
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            assert hasattr(pool, 'map'), "ThreadPoolExecutor 必须有 map"
+            assert not hasattr(pool, 'imap'), \
+                "ThreadPoolExecutor 不该有 imap（那是 multiprocessing.Pool 的 API）"
+
+    def test_pipeline_source_uses_pool_map_not_imap(self):
+        """源码静态扫描：禁止 pool.imap( 出现在 loki_pipeline.py。"""
+        from pathlib import Path
+        src = Path(__file__).parent.parent / "loki_pipeline.py"
+        text = src.read_text(encoding="utf-8")
+        assert "pool.imap(" not in text, \
+            "loki_pipeline.py 仍含 pool.imap(，会触发 AttributeError；应用 pool.map("
+        assert "pool.map(" in text, "loki_pipeline.py 应使用 pool.map( 做并行 I/O"
+
+    def test_threadpool_map_streams_tuple_results_in_order(self):
+        """sanity：ThreadPoolExecutor.map 能按提交顺序流式 yield tuple，与生产代码同型。"""
+        import concurrent.futures
+
+        def _read_one(item):
+            i, val = item
+            return (i, val.upper(), None)
+
+        items = [(i, c) for i, c in enumerate(['a', 'b', 'c', 'd'])]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(_read_one, items))
+        assert results == [(0, 'A', None), (1, 'B', None), (2, 'C', None), (3, 'D', None)], \
+            "ThreadPoolExecutor.map 应按输入顺序返回结果"
