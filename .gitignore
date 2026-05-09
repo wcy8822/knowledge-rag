@@ -52,3 +52,4 @@ logs/
 
 # 遗留日志
 code/local-rag-system/logs/
+.gateguard-disabled

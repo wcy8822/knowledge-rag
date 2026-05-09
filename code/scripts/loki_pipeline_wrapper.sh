@@ -91,4 +91,15 @@ wait "$PIPELINE_PID" 2>/dev/null
 EXIT_CODE=$?
 [[ "$KILLED_BY_LIMIT" -eq 1 ]] && EXIT_CODE=137  # 标记内存超限退出
 echo "Loki wrapper 结束 exit=$EXIT_CODE $(date '+%F %T')" | tee -a "$WRAPPER_LOG"
+
+# 自动生成 daily 工作总结 (失败不影响 wrapper 退出码 — 报告失败不该掩盖 pipeline 成功)
+DAILY_REPORT="$SCRIPT_DIR/loki_daily_report.py"
+if [[ -f "$DAILY_REPORT" ]]; then
+    if "$PYTHON" "$DAILY_REPORT" --date "$(date '+%Y-%m-%d')" >> "$WRAPPER_LOG" 2>&1; then
+        echo "  📊 daily 报告已生成" >> "$WRAPPER_LOG"
+    else
+        echo "  ⚠️  daily 报告生成失败 (不影响 pipeline 退出码)" >> "$WRAPPER_LOG"
+    fi
+fi
+
 exit "$EXIT_CODE"
